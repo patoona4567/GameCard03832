@@ -417,7 +417,8 @@ namespace PangGolf
         {
             GUI.DrawTexture(new Rect(0, 0, W, H), vignette);
             int n = Holes.All.Length;
-            float cw = 90f, labelW = 120f;
+            float labelW = 120f;
+            float cw = Mathf.Min(90f, (W - 80f - labelW) / (n + 1));
             float tw = labelW + cw * (n + 1);
             float x0 = (W - tw) * 0.5f, y0 = 170f;
             Box(new Rect(x0 - 20, y0 - 80, tw + 40, 290));

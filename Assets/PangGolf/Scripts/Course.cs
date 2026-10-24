@@ -63,6 +63,50 @@ namespace PangGolf
                 ponds = new[] { new Vector3(415, 255, 18) },
                 hills = 6f, rise = -2f, greenTilt = new Vector2(-0.02f, -0.02f), seed = 51, windMax = 9f
             },
+            new HoleDef
+            {
+                name = "Coral Cove", par = 4,
+                path = new[] { new Vector2(300, 80), new Vector2(300, 260), new Vector2(290, 430) },
+                fairwayWidth = 40f, greenRadius = 15f, pinOffset = new Vector2(-4, 5),
+                bunkers = new[] { new Vector3(298, 262, 7), new Vector3(270, 440, 6), new Vector3(312, 446, 6) },
+                ponds = new[] { new Vector3(250, 300, 20), new Vector3(350, 335, 18) },
+                hills = 4f, rise = 2f, greenTilt = new Vector2(0.02f, 0.02f), seed = 63, windMax = 6f
+            },
+            new HoleDef
+            {
+                name = "Windmill Hill", par = 4,
+                path = new[] { new Vector2(150, 120), new Vector2(180, 300), new Vector2(320, 400) },
+                fairwayWidth = 40f, greenRadius = 15f, pinOffset = new Vector2(4, 2),
+                bunkers = new[] { new Vector3(150, 322, 10), new Vector3(337, 386, 6), new Vector3(305, 420, 5) },
+                hills = 8f, rise = 10f, greenTilt = new Vector2(-0.025f, 0.015f), seed = 77, windMax = 9f
+            },
+            new HoleDef
+            {
+                name = "Lotus Pond", par = 3,
+                path = new[] { new Vector2(330, 240), new Vector2(350, 365) },
+                fairwayWidth = 30f, fairwayStart = 0.85f, greenRadius = 14f, pinOffset = new Vector2(3, -3),
+                bunkers = new[] { new Vector3(332, 380, 5), new Vector3(368, 352, 5) },
+                ponds = new[] { new Vector3(338, 300, 30), new Vector3(378, 402, 13) },
+                hills = 3f, rise = 1f, greenTilt = new Vector2(0.03f, -0.02f), seed = 89, windMax = 6f
+            },
+            new HoleDef
+            {
+                name = "Canyon Run", par = 5,
+                path = new[] { new Vector2(480, 70), new Vector2(430, 230), new Vector2(500, 380), new Vector2(440, 540) },
+                fairwayWidth = 38f, greenRadius = 16f, pinOffset = new Vector2(-5, -3),
+                bunkers = new[] { new Vector3(405, 250, 8), new Vector3(472, 522, 7), new Vector3(418, 548, 6) },
+                ponds = new[] { new Vector3(522, 292, 18) },
+                hills = 9f, rise = 6f, greenTilt = new Vector2(0.02f, -0.025f), seed = 97, windMax = 8f
+            },
+            new HoleDef
+            {
+                name = "Grand Finale", par = 4,
+                path = new[] { new Vector2(120, 500), new Vector2(150, 330), new Vector2(260, 200) },
+                fairwayWidth = 40f, greenRadius = 16f, pinOffset = new Vector2(3, 4),
+                bunkers = new[] { new Vector3(118, 318, 9), new Vector3(278, 216, 6), new Vector3(246, 180, 6) },
+                ponds = new[] { new Vector3(212, 305, 24) },
+                hills = 6f, rise = -5f, greenTilt = new Vector2(-0.02f, 0.025f), seed = 109, windMax = 9f
+            },
         };
     }
 
