@@ -126,7 +126,11 @@ namespace PangGolf
         const float ObExtra = 48f;
 
         // Terrain layer indices
-        const int LRough = 0, LFairLight = 1, LFairDark = 2, LGreenLight = 3, LGreenDark = 4, LSand = 5, LDeep = 6, LFringe = 7, LayerCount = 8;
+        const int LRough = 0, LFairLight = 1, LFairDark = 2, LGreenLight = 3, LGreenDark = 4, LSand = 5, LDeep = 6, LFringe = 7, LDry = 8, LDirt = 9, LayerCount = 10;
+
+        static TerrainLayer[] sharedLayers; // generated once, reused by every hole
+        float[,,] pendingMap;
+        byte[,] pendingIdx;
 
         public HoleDef hole;
         public Terrain terrain;
@@ -195,6 +199,7 @@ namespace PangGolf
             BuildTrees();
             BuildPalmsAndRocks();
             BuildForestBelt();
+            ApplySplatMap();
             BuildStakes();
             BuildTeeMarkers();
             BuildFlag();
@@ -229,17 +234,7 @@ namespace PangGolf
             }
             td.SetHeights(0, 0, heights);
 
-            var grassN = ProcGen.NormalMap(256, 12f, 5f, 1f, 11);
-            var sandN = ProcGen.NormalMap(256, 6f, 3f, 0.6f, 12, 3f);
-            var layers = new TerrainLayer[LayerCount];
-            layers[LRough] = Layer(ProcGen.Grass(256, new Color(0.2f, 0.42f, 0.1f), new Color(0.32f, 0.55f, 0.15f), 6f, 0f, 1, 0.4f), grassN, 7f);
-            layers[LFairLight] = Layer(ProcGen.Grass(256, new Color(0.4f, 0.7f, 0.2f), new Color(0.47f, 0.77f, 0.25f), 4f, 0f, 2, 0.18f), grassN, 9f);
-            layers[LFairDark] = Layer(ProcGen.Grass(256, new Color(0.31f, 0.6f, 0.16f), new Color(0.38f, 0.67f, 0.2f), 4f, 0f, 3, 0.18f), grassN, 9f);
-            layers[LGreenLight] = Layer(ProcGen.Grass(256, new Color(0.48f, 0.82f, 0.28f), new Color(0.53f, 0.87f, 0.32f), 9f, 0f, 4, 0.06f), grassN, 4f);
-            layers[LGreenDark] = Layer(ProcGen.Grass(256, new Color(0.4f, 0.74f, 0.24f), new Color(0.45f, 0.79f, 0.28f), 9f, 0f, 5, 0.06f), grassN, 4f);
-            layers[LSand] = Layer(ProcGen.Grass(256, new Color(0.88f, 0.8f, 0.6f), new Color(0.97f, 0.91f, 0.74f), 10f, 0f, 6, 0.35f), sandN, 5f);
-            layers[LDeep] = Layer(ProcGen.Grass(256, new Color(0.14f, 0.3f, 0.09f), new Color(0.26f, 0.4f, 0.13f), 5f, 0f, 7, 0.5f), grassN, 10f);
-            layers[LFringe] = Layer(ProcGen.Grass(256, new Color(0.36f, 0.66f, 0.2f), new Color(0.42f, 0.72f, 0.24f), 7f, 0f, 8, 0.12f), grassN, 5f);
+            var layers = SharedLayers();
             td.terrainLayers = layers;
 
             // Classify every alphamap texel, with mowing stripes on fairway and green
@@ -271,6 +266,12 @@ namespace PangGolf
                             layer = Vector2.Distance(new Vector2(x, z), gc) < hole.greenRadius * 1.12f + 2.5f ? LFringe : LRough;
                             break;
                     }
+                    if (layer == LRough || layer == LDeep)
+                    {
+                        // Sun-dried patches break up the uniform green
+                        float dry = Mathf.PerlinNoise(x * 0.025f + sz, z * 0.025f + sx) * 0.75f + Mathf.PerlinNoise(x * 0.11f, z * 0.11f) * 0.25f;
+                        if (dry > 0.66f) layer = LDry;
+                    }
                     idx[zi, xi] = (byte)layer;
                     if ((zi & 1) == 0 && (xi & 1) == 0) surfDetail[zi / 2, xi / 2] = s;
                 }
@@ -288,7 +289,8 @@ namespace PangGolf
                         }
                 }
             }
-            td.SetAlphamaps(0, 0, map);
+            pendingMap = map; // uploaded after trees are placed (shade under trees)
+            pendingIdx = idx;
 
             // Grass and wild flowers
             td.detailPrototypes = new[]
@@ -347,6 +349,72 @@ namespace PangGolf
             terrain.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.BlendProbes;
         }
 
+        /// <summary>Terrain layers: user textures from Resources/Art/Terrain where present, procedural otherwise.</summary>
+        static TerrainLayer[] SharedLayers()
+        {
+            if (sharedLayers != null) return sharedLayers;
+            var grassN = ProcGen.NormalMap(256, 12f, 5f, 1f, 11);
+            var sandN = ProcGen.NormalMap(256, 6f, 3f, 0.6f, 12, 3f);
+            var dirtN = ProcGen.NormalMap(256, 8f, 6f, 1f, 13);
+            var L = new TerrainLayer[LayerCount];
+
+            Texture2D n;
+            var userRough = ArtLibrary.TerrainTexture("Rough", out n);
+            L[LRough] = userRough != null ? Layer(userRough, n, 3f)
+                : Layer(ProcGen.Grass(512, new Color(0.2f, 0.42f, 0.1f), new Color(0.34f, 0.57f, 0.16f), 6f, 0f, 1, 0.45f), grassN, 7f);
+
+            Texture2D fn;
+            var userFair = ArtLibrary.TerrainTexture("Fairway", out fn);
+            if (userFair != null)
+            {
+                L[LFairLight] = Layer(ArtLibrary.Tinted(userFair, 1.06f, Color.white), fn, 3f);
+                L[LFairDark] = Layer(ArtLibrary.Tinted(userFair, 0.86f, Color.white), fn, 3f);
+            }
+            else
+            {
+                L[LFairLight] = Layer(ProcGen.Grass(512, new Color(0.4f, 0.7f, 0.2f), new Color(0.48f, 0.78f, 0.26f), 4f, 0f, 2, 0.2f), grassN, 9f);
+                L[LFairDark] = Layer(ProcGen.Grass(512, new Color(0.31f, 0.6f, 0.16f), new Color(0.39f, 0.68f, 0.21f), 4f, 0f, 3, 0.2f), grassN, 9f);
+            }
+
+            var userGreen = ArtLibrary.TerrainTexture("Green", out n);
+            if (userGreen == null && userFair != null) { userGreen = ArtLibrary.Tinted(userFair, 1.1f, new Color(1f, 1.05f, 0.95f)); n = fn; }
+            if (userGreen != null)
+            {
+                L[LGreenLight] = Layer(ArtLibrary.Tinted(userGreen, 1.06f, Color.white), n, 2f);
+                L[LGreenDark] = Layer(ArtLibrary.Tinted(userGreen, 0.9f, Color.white), n, 2f);
+            }
+            else
+            {
+                L[LGreenLight] = Layer(ProcGen.Grass(256, new Color(0.48f, 0.82f, 0.28f), new Color(0.53f, 0.87f, 0.32f), 9f, 0f, 4, 0.06f), grassN, 4f);
+                L[LGreenDark] = Layer(ProcGen.Grass(256, new Color(0.4f, 0.74f, 0.24f), new Color(0.45f, 0.79f, 0.28f), 9f, 0f, 5, 0.06f), grassN, 4f);
+            }
+
+            var userSand = ArtLibrary.TerrainTexture("Sand", out n);
+            L[LSand] = userSand != null ? Layer(userSand, n, 3f)
+                : Layer(ProcGen.Grass(256, new Color(0.88f, 0.8f, 0.6f), new Color(0.97f, 0.91f, 0.74f), 10f, 0f, 6, 0.35f), sandN, 5f);
+
+            var userDeep = ArtLibrary.TerrainTexture("DeepRough", out n);
+            if (userDeep == null && userRough != null) { userDeep = ArtLibrary.Tinted(userRough, 0.72f, Color.white); ArtLibrary.TerrainTexture("Rough", out n); }
+            L[LDeep] = userDeep != null ? Layer(userDeep, n, 3.5f)
+                : Layer(ProcGen.Grass(512, new Color(0.14f, 0.3f, 0.09f), new Color(0.27f, 0.41f, 0.14f), 5f, 0f, 7, 0.55f), grassN, 10f);
+
+            var userFringe = ArtLibrary.TerrainTexture("Fringe", out n);
+            if (userFringe == null && userFair != null) { userFringe = ArtLibrary.Tinted(userFair, 0.95f, Color.white); n = fn; }
+            L[LFringe] = userFringe != null ? Layer(userFringe, n, 3f)
+                : Layer(ProcGen.Grass(256, new Color(0.36f, 0.66f, 0.2f), new Color(0.42f, 0.72f, 0.24f), 7f, 0f, 8, 0.12f), grassN, 5f);
+
+            var userDry = ArtLibrary.TerrainTexture("DryGrass", out n);
+            L[LDry] = userDry != null ? Layer(userDry, n, 3f)
+                : Layer(ProcGen.Grass(512, new Color(0.42f, 0.48f, 0.18f), new Color(0.6f, 0.6f, 0.28f), 6f, 0f, 9, 0.5f), grassN, 8f);
+
+            var userDirt = ArtLibrary.TerrainTexture("Dirt", out n);
+            L[LDirt] = userDirt != null ? Layer(userDirt, n, 3f)
+                : Layer(ProcGen.Grass(256, new Color(0.2f, 0.17f, 0.1f), new Color(0.3f, 0.32f, 0.15f), 8f, 0f, 10, 0.6f), dirtN, 4f);
+
+            sharedLayers = L;
+            return L;
+        }
+
         static TerrainLayer Layer(Texture2D tex, Texture2D normal, float tile)
         {
             return new TerrainLayer
@@ -390,33 +458,38 @@ namespace PangGolf
             }
         }
 
-        // Shared tree materials (built once per hole)
-        Material trunkMat, pineMat, palmTrunkMat, palmLeafMat, rockMat;
-        Material[] leafMats;
-        Mesh coneMesh;
+        // ------------------------------------------------------------------ Vegetation
 
-        void EnsureTreeMaterials()
+        /// <summary>User model if one was supplied (see ArtLibrary), otherwise a procedural leaf-card tree.</summary>
+        void PlaceTree(Transform root, Vector3 pos, float s, bool colliders, TreeFactory.Kind kind)
         {
-            if (trunkMat != null) return;
-            trunkMat = ProcGen.Lit(new Color(0.4f, 0.27f, 0.16f), 0.05f);
-            leafMats = new[]
+            ArtLibrary.Cat cat;
+            float height;
+            switch (kind)
             {
-                ProcGen.Foliage(new Color(0.2f, 0.5f, 0.14f)),
-                ProcGen.Foliage(new Color(0.28f, 0.6f, 0.17f)),
-                ProcGen.Foliage(new Color(0.38f, 0.64f, 0.15f)),
-                ProcGen.Foliage(new Color(0.55f, 0.7f, 0.2f)),
-                ProcGen.Foliage(new Color(0.85f, 0.55f, 0.65f), 0.1f), // blossom
-            };
-            pineMat = ProcGen.Foliage(new Color(0.1f, 0.34f, 0.16f), 0.06f);
-            palmTrunkMat = ProcGen.Lit(new Color(0.55f, 0.45f, 0.32f), 0.05f);
-            palmLeafMat = ProcGen.Foliage(new Color(0.3f, 0.6f, 0.18f), 0.2f);
-            rockMat = ProcGen.VertexLit();
-            coneMesh = ProcGen.Cone(16);
+                case TreeFactory.Kind.Pine: cat = ArtLibrary.Cat.Pine; height = 11f * s; break;
+                case TreeFactory.Kind.Bush: cat = ArtLibrary.Cat.Bush; height = 1.3f * s; break;
+                case TreeFactory.Kind.FlowerBush: cat = ArtLibrary.Cat.Flower; height = 0.8f * s; break;
+                default: cat = ArtLibrary.Cat.Tree; height = 8.5f * s; break;
+            }
+            if (ArtLibrary.Spawn(cat, root, pos, height, colliders) != null) return;
+            TreeFactory.Make(kind, root, pos, s, colliders);
+        }
+
+        void PlacePalm(Transform root, Vector3 pos, float s)
+        {
+            if (ArtLibrary.Spawn(ArtLibrary.Cat.Palm, root, pos, 8.5f * s, true) != null) return;
+            TreeFactory.MakePalm(root, pos, s);
+        }
+
+        void PlaceRock(Transform root, Vector3 pos, float sc)
+        {
+            if (ArtLibrary.Spawn(ArtLibrary.Cat.Rock, root, pos, sc * 1.1f, true) != null) return;
+            TreeFactory.MakeRock(root, pos, sc);
         }
 
         void BuildTrees()
         {
-            EnsureTreeMaterials();
             var root = new GameObject("Trees").transform;
             root.SetParent(transform, false);
 
@@ -442,37 +515,31 @@ namespace PangGolf
                 if (TooClose(pos, 6.5f)) continue;
                 trees.Add(pos);
                 float r = Random.value;
-                if (r < 0.3f) MakePine(root, pos, Random.Range(0.8f, 1.5f), true);
-                else MakeRoundTree(root, pos, Random.Range(0.8f, 1.5f), true, Random.value < 0.06f);
+                var kind = r < 0.3f ? TreeFactory.Kind.Pine : r < 0.36f ? TreeFactory.Kind.Blossom : TreeFactory.Kind.Round;
+                PlaceTree(root, pos, Random.Range(0.85f, 1.35f), true, kind);
+                // Undergrowth at the foot of some trees
+                if (Random.value < 0.35f)
+                {
+                    Vector2 off = Random.insideUnitCircle.normalized * Random.Range(1.5f, 3f);
+                    PlaceTree(root, OnGround(x + off.x, z + off.y), Random.Range(0.7f, 1.2f), false, TreeFactory.Kind.Bush);
+                }
             }
 
-            // Small bushes and flower beds along the rough line
-            var bushMat = ProcGen.Foliage(new Color(0.28f, 0.52f, 0.18f), 0.05f);
-            var flowerMats = new[]
-            {
-                ProcGen.Foliage(new Color(0.98f, 0.45f, 0.62f), 0.05f),
-                ProcGen.Foliage(new Color(1f, 0.85f, 0.3f), 0.05f),
-                ProcGen.Foliage(new Color(0.95f, 0.95f, 1f), 0.05f),
-                ProcGen.Foliage(new Color(0.65f, 0.5f, 1f), 0.05f),
-            };
-            for (int i = 0; i < 220; i++)
+            // Bushes and flower beds along the rough line
+            for (int i = 0; i < 260; i++)
             {
                 float x = Random.Range(minX, maxX), z = Random.Range(minZ, maxZ);
                 var pi = Path(x, z);
                 if (pi.d < fw + 10f || pi.d > fw + 40f) continue;
                 if (Vector2.Distance(new Vector2(x, z), hole.path[hole.path.Length - 1]) < hole.greenRadius + 8f) continue;
                 if (SurfaceAt(new Vector3(x, 0, z)) != Surface.Rough) continue;
-                var pos = OnGround(x, z);
-                bool flower = Random.value < 0.45f;
-                int blobs = flower ? 4 : 2;
-                var mat = flower ? flowerMats[Random.Range(0, flowerMats.Length)] : bushMat;
-                for (int b = 0; b < blobs; b++)
+                bool flower = Random.value < 0.4f;
+                int n = flower ? Random.Range(2, 5) : 1;
+                for (int k = 0; k < n; k++)
                 {
-                    var bush = ProcGen.Prim(PrimitiveType.Sphere, root, mat);
-                    Vector2 off = Random.insideUnitCircle * (flower ? 0.9f : 0.5f);
-                    bush.transform.position = pos + new Vector3(off.x, 0.15f, off.y);
-                    float sc = flower ? Random.Range(0.45f, 0.75f) : Random.Range(0.9f, 1.5f);
-                    bush.transform.localScale = new Vector3(sc, sc * 0.65f, sc);
+                    Vector2 off = k == 0 ? Vector2.zero : Random.insideUnitCircle * 1.6f;
+                    PlaceTree(root, OnGround(x + off.x, z + off.y), Random.Range(0.75f, 1.35f), false,
+                              flower ? TreeFactory.Kind.FlowerBush : TreeFactory.Kind.Bush);
                 }
             }
         }
@@ -492,95 +559,8 @@ namespace PangGolf
             return false;
         }
 
-        void MakeRoundTree(Transform root, Vector3 pos, float s, bool colliders, bool blossom)
-        {
-            var tree = new GameObject("Tree").transform;
-            tree.SetParent(root, false);
-            tree.position = pos;
-            tree.rotation = Quaternion.Euler(Random.Range(-3f, 3f), Random.Range(0f, 360f), Random.Range(-3f, 3f));
-
-            var trunk = ProcGen.Prim(PrimitiveType.Cylinder, tree, trunkMat, colliders);
-            trunk.transform.localPosition = new Vector3(0, 1.6f * s, 0);
-            trunk.transform.localScale = new Vector3(0.42f * s, 1.6f * s, 0.42f * s);
-            // Branch stubs
-            for (int k = 0; k < 2; k++)
-            {
-                var br = ProcGen.Prim(PrimitiveType.Cylinder, tree, trunkMat);
-                br.transform.localPosition = new Vector3((k == 0 ? 0.5f : -0.45f) * s, 2.9f * s, (k == 0 ? 0.2f : -0.3f) * s);
-                br.transform.localRotation = Quaternion.Euler(0, 0, k == 0 ? -40f : 38f);
-                br.transform.localScale = new Vector3(0.2f * s, 0.7f * s, 0.2f * s);
-            }
-
-            var mat = blossom ? leafMats[leafMats.Length - 1] : leafMats[Random.Range(0, leafMats.Length - 1)];
-            var main = ProcGen.Prim(PrimitiveType.Sphere, tree, mat, colliders);
-            main.transform.localPosition = new Vector3(0, 4.6f * s, 0);
-            main.transform.localScale = new Vector3(4.4f, 3.8f, 4.4f) * s;
-            int blobs = Random.Range(4, 7);
-            for (int k = 0; k < blobs; k++)
-            {
-                var blob = ProcGen.Prim(PrimitiveType.Sphere, tree, mat, colliders && k == 0);
-                float a = k * Mathf.PI * 2f / blobs + Random.value * 0.6f;
-                float rr = Random.Range(1.3f, 2.1f);
-                blob.transform.localPosition = new Vector3(Mathf.Cos(a) * rr, Random.Range(3.4f, 5.8f), Mathf.Sin(a) * rr) * s;
-                blob.transform.localScale = Vector3.one * Random.Range(2.2f, 3.2f) * s;
-            }
-            var top = ProcGen.Prim(PrimitiveType.Sphere, tree, mat);
-            top.transform.localPosition = new Vector3(Random.Range(-0.4f, 0.4f), 6.3f, Random.Range(-0.4f, 0.4f)) * s;
-            top.transform.localScale = Vector3.one * 2.6f * s;
-        }
-
-        void MakePine(Transform root, Vector3 pos, float s, bool colliders)
-        {
-            var tree = new GameObject("Pine").transform;
-            tree.SetParent(root, false);
-            tree.position = pos;
-            tree.rotation = Quaternion.Euler(0, Random.Range(0f, 360f), 0);
-            var trunk = ProcGen.Prim(PrimitiveType.Cylinder, tree, trunkMat, colliders);
-            trunk.transform.localPosition = new Vector3(0, 1.4f * s, 0);
-            trunk.transform.localScale = new Vector3(0.38f * s, 1.4f * s, 0.38f * s);
-            int tiers = Random.Range(3, 5);
-            for (int k = 0; k < tiers; k++)
-            {
-                float r = (2.8f - k * 2.2f / tiers) * s;
-                var cone = ProcGen.MeshObject("Tier", coneMesh, tree, pineMat);
-                cone.transform.localPosition = new Vector3(0, (1.8f + k * 1.7f) * s, 0);
-                cone.transform.localRotation = Quaternion.Euler(0, k * 37f, 0);
-                cone.transform.localScale = new Vector3(r, 3.0f * s, r);
-                if (colliders)
-                {
-                    var cc = cone.AddComponent<CapsuleCollider>();
-                    cc.direction = 1; cc.radius = 0.55f; cc.height = 1f; cc.center = new Vector3(0, 0.5f, 0);
-                }
-            }
-        }
-
-        void MakePalm(Transform root, Vector3 pos, float s)
-        {
-            var palm = new GameObject("Palm").transform;
-            palm.SetParent(root, false);
-            palm.position = pos;
-            palm.rotation = Quaternion.Euler(0, Random.Range(0f, 360f), 0);
-            float h = Random.Range(6f, 8.5f) * s;
-            float lean = Random.Range(0.8f, 2.2f) * s;
-            ProcGen.MeshObject("Trunk", ProcGen.PalmTrunk(h, lean), palm, palmTrunkMat);
-            var crown = ProcGen.MeshObject("Fronds", ProcGen.PalmFronds(Random.Range(8, 11), Random.Range(0, 9999)), palm, palmLeafMat);
-            crown.transform.localPosition = new Vector3(lean, h, 0f);
-            crown.transform.localScale = Vector3.one * s;
-            var col = palm.gameObject.AddComponent<CapsuleCollider>();
-            col.direction = 1; col.radius = 0.3f * s; col.height = h; col.center = new Vector3(lean * 0.4f, h * 0.5f, 0f);
-            var crownCol = crown.AddComponent<SphereCollider>();
-            crownCol.radius = 2.2f; crownCol.center = new Vector3(0, -0.4f, 0);
-            for (int k = 0; k < 3; k++)
-            {
-                var coconut = ProcGen.Prim(PrimitiveType.Sphere, crown.transform, trunkMat);
-                coconut.transform.localPosition = new Vector3(Mathf.Cos(k * 2.1f) * 0.3f, -0.25f, Mathf.Sin(k * 2.1f) * 0.3f);
-                coconut.transform.localScale = Vector3.one * 0.32f;
-            }
-        }
-
         void BuildPalmsAndRocks()
         {
-            EnsureTreeMaterials();
             var root = new GameObject("Palms & Rocks").transform;
             root.SetParent(transform, false);
 
@@ -599,7 +579,7 @@ namespace PangGolf
                     var pos = OnGround(x, z);
                     if (TooClose(pos, 5f)) continue;
                     trees.Add(pos);
-                    MakePalm(root, pos, Random.Range(0.85f, 1.15f));
+                    PlacePalm(root, pos, Random.Range(0.85f, 1.15f));
                     n--;
                 }
             }
@@ -612,14 +592,14 @@ namespace PangGolf
                 Vector3 pos = OnGround(gc.x + Mathf.Cos(a) * r, gc.y + Mathf.Sin(a) * r);
                 if (NearHazard(pos.x, pos.z, 3f, 6f) || TooClose(pos, 5f)) continue;
                 trees.Add(pos);
-                MakePalm(root, pos, Random.Range(0.9f, 1.2f));
+                PlacePalm(root, pos, Random.Range(0.9f, 1.2f));
             }
 
             // Rocks by the water and scattered in the deep rough
-            for (int i = 0; i < 40; i++)
+            for (int i = 0; i < 45; i++)
             {
                 Vector3 pos;
-                if (hole.ponds.Length > 0 && i < 18)
+                if (hole.ponds.Length > 0 && i < 20)
                 {
                     var p = hole.ponds[i % hole.ponds.Length];
                     float a = Random.Range(0f, Mathf.PI * 2f);
@@ -633,21 +613,13 @@ namespace PangGolf
                     pos = OnGround(x, z);
                 }
                 if (Path(pos.x, pos.z).d < hole.fairwayWidth * 0.5f + 3f) continue;
-                var mesh = ProcGen.Rock(Random.Range(0, 9999));
-                if (mesh == null) break;
-                var rock = ProcGen.MeshObject("Rock", mesh, root, rockMat);
-                float sc = Random.Range(0.6f, 2.2f);
-                rock.transform.position = pos + Vector3.down * 0.15f * sc;
-                rock.transform.rotation = Quaternion.Euler(0, Random.Range(0f, 360f), 0);
-                rock.transform.localScale = new Vector3(sc * Random.Range(0.9f, 1.4f), sc, sc * Random.Range(0.9f, 1.4f));
-                rock.AddComponent<SphereCollider>().radius = 0.75f;
+                PlaceRock(root, pos, Random.Range(0.6f, 2.2f));
             }
         }
 
         /// <summary>Dense band of trees around the terrain border so the world doesn't just end.</summary>
         void BuildForestBelt()
         {
-            EnsureTreeMaterials();
             var root = new GameObject("Forest Belt").transform;
             root.SetParent(transform, false);
             float fw = hole.fairwayWidth * 0.5f;
@@ -662,9 +634,39 @@ namespace PangGolf
                 if (TooClose(pos, 7f)) continue;
                 trees.Add(pos);
                 placed++;
-                if (Random.value < 0.4f) MakePine(root, pos, Random.Range(1.1f, 1.8f), false);
-                else MakeRoundTree(root, pos, Random.Range(1.1f, 1.8f), false, false);
+                PlaceTree(root, pos, Random.Range(1.15f, 1.7f), false, Random.value < 0.4f ? TreeFactory.Kind.Pine : TreeFactory.Kind.Round);
             }
+        }
+
+        /// <summary>Darkens the ground under trees with a dirt/shade layer, then uploads the splat map.</summary>
+        void ApplySplatMap()
+        {
+            if (pendingMap == null) return;
+            float cell = Size / ARes;
+            foreach (var t in trees)
+            {
+                if (t.x < 0f || t.z < 0f || t.x >= Size || t.z >= Size) continue;
+                float radius = 2.8f;
+                int cx = (int)(t.x / cell), cz = (int)(t.z / cell), rr = Mathf.CeilToInt(radius / cell);
+                for (int z = cz - rr; z <= cz + rr; z++)
+                {
+                    if (z < 0 || z >= ARes) continue;
+                    for (int x = cx - rr; x <= cx + rr; x++)
+                    {
+                        if (x < 0 || x >= ARes) continue;
+                        int baseLayer = pendingIdx[z, x];
+                        if (baseLayer != LRough && baseLayer != LDeep && baseLayer != LDry) continue;
+                        float d = Mathf.Sqrt((x - cx) * (x - cx) + (z - cz) * (z - cz)) * cell;
+                        if (d > radius) continue;
+                        float w = (1f - d / radius) * 0.8f;
+                        for (int l = 0; l < LayerCount; l++) pendingMap[z, x, l] *= 1f - w;
+                        pendingMap[z, x, LDirt] += w;
+                    }
+                }
+            }
+            td.SetAlphamaps(0, 0, pendingMap);
+            pendingMap = null;
+            pendingIdx = null;
         }
 
         void BuildStakes()
@@ -999,6 +1001,12 @@ namespace PangGolf
             float h = BaseHeight(x, z);
             Vector2 q = new Vector2(x, z);
 
+            // Small mounds and hollows in the rough; fairways stay smooth (greens are flattened below)
+            float fwHalf = hole.fairwayWidth * 0.5f;
+            float roughK = Smooth(fwHalf - 2f, fwHalf + 12f, Path(x, z).d);
+            h += ((Mathf.PerlinNoise(x * 0.12f + sx, z * 0.12f + sz) - 0.5f) * 0.6f
+                  + (Mathf.PerlinNoise(x * 0.31f + sz, z * 0.31f + sx) - 0.5f) * 0.22f) * (0.15f + 0.85f * roughK);
+
             float dTee = Vector2.Distance(q, hole.path[0]);
             h = Mathf.Lerp(h, teeH, 1f - Smooth(5f, 11f, dTee));
 
@@ -1012,6 +1020,8 @@ namespace PangGolf
             {
                 float d = Vector2.Distance(q, new Vector2(b.x, b.y));
                 h -= 1.1f * (1f - Smooth(b.z * 0.5f, b.z * 1.05f, d));
+                // Raised grassy lip around the bunker
+                h += 0.35f * Smooth(b.z * 0.95f, b.z * 1.12f, d) * (1f - Smooth(b.z * 1.2f, b.z * 1.6f, d));
             }
             foreach (var p in hole.ponds)
             {

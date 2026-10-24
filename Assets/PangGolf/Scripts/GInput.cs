@@ -13,7 +13,7 @@ namespace PangGolf
         SpinUp, SpinDown, SpinLeft, SpinRight, SpinReset,
         PowerShot, SpecialShot,
         ViewLanding, ViewGreen,
-        Restart, Help, Fine
+        Restart, Help, Fine, Graphics
     }
 
     /// <summary>
@@ -48,6 +48,7 @@ namespace PangGolf
                 case GKey.Restart: return new ButtonControl[] { kb.rKey };
                 case GKey.Help: return new ButtonControl[] { kb.hKey };
                 case GKey.Fine: return new ButtonControl[] { kb.leftShiftKey, kb.rightShiftKey };
+                case GKey.Graphics: return new ButtonControl[] { kb.gKey };
             }
             return System.Array.Empty<ButtonControl>();
         }
@@ -88,6 +89,7 @@ namespace PangGolf
                 case GKey.Restart: return new[] { KeyCode.R };
                 case GKey.Help: return new[] { KeyCode.H };
                 case GKey.Fine: return new[] { KeyCode.LeftShift, KeyCode.RightShift };
+                case GKey.Graphics: return new[] { KeyCode.G };
             }
             return new KeyCode[0];
         }

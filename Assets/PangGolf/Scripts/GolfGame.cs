@@ -369,6 +369,12 @@ namespace PangGolf
             if (toastTimer > 0f) toastTimer -= dt;
             stateTimer += dt;
 
+            if (GInput.Down(GKey.Graphics) && post != null)
+            {
+                post.ambientOcclusion = !post.ambientOcclusion;
+                Toast("Ambient occlusion " + (post.ambientOcclusion ? "ON" : "OFF"));
+            }
+
             switch (state)
             {
                 case State.Title:

@@ -102,6 +102,46 @@ namespace PangGolf
             return m;
         }
 
+        /// <summary>Alpha-tested, double-sided, wind-swayed leaf cards. Falls back to Standard cutout.</summary>
+        public static Material FoliageCards(Texture2D tex, Color c, float sway = 0.12f)
+        {
+            var sh = Custom("PangGolf/Foliage");
+            Material m;
+            if (sh != null)
+            {
+                m = new Material(sh);
+                m.SetFloat("_Sway", sway);
+                m.SetFloat("_Cull", 0f);
+            }
+            else
+            {
+                m = Lit(c, 0.1f);
+                m.SetFloat("_Mode", 1f);
+                m.EnableKeyword("_ALPHATEST_ON");
+                m.renderQueue = (int)RenderQueue.AlphaTest;
+            }
+            m.color = c;
+            m.mainTexture = tex;
+            m.SetFloat("_Cutoff", 0.45f);
+            m.enableInstancing = true;
+            return m;
+        }
+
+        /// <summary>Standard material with albedo + normal map.</summary>
+        public static Material Textured(Texture2D albedo, Texture2D normal, Color tint, float gloss, float tile = 1f)
+        {
+            var m = Lit(tint, gloss);
+            m.mainTexture = albedo;
+            m.mainTextureScale = new Vector2(tile, tile);
+            if (normal != null)
+            {
+                m.SetTexture("_BumpMap", normal);
+                m.SetFloat("_BumpScale", 1f);
+                m.EnableKeyword("_NORMALMAP");
+            }
+            return m;
+        }
+
         /// <summary>Lambert lit material driven by mesh vertex colours.</summary>
         public static Material VertexLit()
         {
@@ -338,17 +378,17 @@ namespace PangGolf
                 float g = 0.42f + 0.25f * n + (v.y > 0.6f ? 0.05f : 0f);
                 cols[i] = v.y > 0.7f && n > 0.55f ? new Color(0.35f, 0.5f, 0.25f) : new Color(g, g * 0.98f, g * 0.94f);
             }
-            var m = new Mesh { vertices = verts, colors = cols, triangles = baseTris };
+            var m = new Mesh { vertices = verts, colors = cols, uv = src.uv, triangles = baseTris };
             m.RecalculateNormals();
             m.RecalculateBounds();
             return m;
         }
 
         /// <summary>Duplicates triangles with flipped winding/normals so a thin mesh renders from both sides.</summary>
-        public static void MakeDoubleSided(List<Vector3> verts, List<Vector3> norms, List<int> tris)
+        public static void MakeDoubleSided(List<Vector3> verts, List<Vector3> norms, List<int> tris, List<Vector2> uvs = null)
         {
             int n = verts.Count, t = tris.Count;
-            for (int i = 0; i < n; i++) { verts.Add(verts[i]); norms.Add(-norms[i]); }
+            for (int i = 0; i < n; i++) { verts.Add(verts[i]); norms.Add(-norms[i]); if (uvs != null) uvs.Add(uvs[i]); }
             for (int i = 0; i < t; i += 3) { tris.Add(tris[i] + n); tris.Add(tris[i + 2] + n); tris.Add(tris[i + 1] + n); }
         }
 
@@ -358,6 +398,7 @@ namespace PangGolf
             var rnd = new System.Random(seed);
             var verts = new List<Vector3>();
             var norms = new List<Vector3>();
+            var uvs = new List<Vector2>();
             var tris = new List<int>();
             const int segs = 7;
             for (int f = 0; f < fronds; f++)
@@ -375,9 +416,9 @@ namespace PangGolf
                     float w = Mathf.Sin(Mathf.PI * Mathf.Min(1f, t * 1.15f + 0.05f)) * 0.55f;
                     Vector3 nrm = Vector3.Cross(side, dir * len + Vector3.up * (0.6f - 2.8f * droop * t)).normalized;
                     if (nrm.y < 0f) nrm = -nrm;
-                    verts.Add(spine - side * w + Vector3.down * w * 0.25f); norms.Add(nrm);
-                    verts.Add(spine); norms.Add(nrm);
-                    verts.Add(spine + side * w + Vector3.down * w * 0.25f); norms.Add(nrm);
+                    verts.Add(spine - side * w + Vector3.down * w * 0.25f); norms.Add(nrm); uvs.Add(new Vector2(0f, t));
+                    verts.Add(spine); norms.Add(nrm); uvs.Add(new Vector2(0.5f, t));
+                    verts.Add(spine + side * w + Vector3.down * w * 0.25f); norms.Add(nrm); uvs.Add(new Vector2(1f, t));
                 }
                 for (int i = 0; i < segs; i++)
                 {
@@ -388,10 +429,11 @@ namespace PangGolf
                     tris.Add(r0 + 1); tris.Add(r1 + 2); tris.Add(r1 + 1);
                 }
             }
-            MakeDoubleSided(verts, norms, tris);
+            MakeDoubleSided(verts, norms, tris, uvs);
             var m = new Mesh();
             m.SetVertices(verts);
             m.SetNormals(norms);
+            m.SetUVs(0, uvs);
             m.SetTriangles(tris, 0);
             m.RecalculateBounds();
             return m;
@@ -402,6 +444,7 @@ namespace PangGolf
         {
             const int rings = 10, segs = 8;
             var verts = new List<Vector3>();
+            var uvs = new List<Vector2>();
             var tris = new List<int>();
             for (int r = 0; r <= rings; r++)
             {
@@ -412,6 +455,7 @@ namespace PangGolf
                 {
                     float a = s * Mathf.PI * 2f / segs;
                     verts.Add(c + new Vector3(Mathf.Cos(a) * rad, 0f, Mathf.Sin(a) * rad));
+                    uvs.Add(new Vector2((float)s / segs * 2f, h * t / 0.9f));
                 }
             }
             for (int r = 0; r < rings; r++)
@@ -424,6 +468,7 @@ namespace PangGolf
                 }
             var m = new Mesh();
             m.SetVertices(verts);
+            m.SetUVs(0, uvs);
             m.SetTriangles(tris, 0);
             m.RecalculateNormals();
             m.RecalculateBounds();
@@ -493,7 +538,11 @@ namespace PangGolf
                     float n = TileNoise(u, v, noiseScale, seed);
                     float n2 = TileNoise(u, v, noiseScale * 4f, seed + 7);
                     float s = Hash(x, y, seed);
-                    float k = Mathf.Clamp01(0.5f + (n - 0.5f) * 1.2f + (n2 - 0.5f) * 0.5f + (s - 0.5f) * speckle);
+                    // Short blade-like streaks: noise stretched along v, plus per-texel sparkle
+                    float blades = TileNoise2(u, v, 64f, 12f, seed + 31) - 0.5f;
+                    float clumps = TileNoise(u, v, noiseScale * 0.5f, seed + 17) - 0.5f;
+                    float k = Mathf.Clamp01(0.5f + (n - 0.5f) * 1.2f + (n2 - 0.5f) * 0.5f + (s - 0.5f) * speckle
+                                            + blades * speckle * 1.4f + clumps * 0.35f);
                     Color c = Color.Lerp(a, b, k);
                     if (stripes > 0f)
                     {
@@ -510,6 +559,17 @@ namespace PangGolf
             t.anisoLevel = 8;
             t.Apply(true);
             return t;
+        }
+
+        /// <summary>Tileable noise with separate (integer) frequencies on u and v.</summary>
+        public static float TileNoise2(float u, float v, float su, float sv, int seed)
+        {
+            float o = seed * 7.77f;
+            float a = Mathf.PerlinNoise(o + u * su, o + v * sv);
+            float b = Mathf.PerlinNoise(o + (u - 1f) * su, o + v * sv);
+            float c = Mathf.PerlinNoise(o + u * su, o + (v - 1f) * sv);
+            float d = Mathf.PerlinNoise(o + (u - 1f) * su, o + (v - 1f) * sv);
+            return Mathf.Lerp(Mathf.Lerp(a, b, u), Mathf.Lerp(c, d, u), v);
         }
 
         public static float TileNoise(float u, float v, float scale, int seed)
@@ -591,6 +651,12 @@ namespace PangGolf
                     if (ripples > 0f) h += Mathf.Sin((u * 6f + TileNoise(u, v, 3f, seed + 9) * 0.6f) * Mathf.PI * 2f * ripples) * 0.35f;
                     hgt[y * size + x] = h;
                 }
+            return NormalFromHeight(hgt, size, strength);
+        }
+
+        /// <summary>Tileable normal map from a square height field (RGB = normal, A = 1).</summary>
+        public static Texture2D NormalFromHeight(float[] hgt, int size, float strength)
+        {
             var t = new Texture2D(size, size, TextureFormat.RGBA32, true, true);
             var px = new Color[size * size];
             for (int y = 0; y < size; y++)

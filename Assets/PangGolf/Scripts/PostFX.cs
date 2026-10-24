@@ -19,6 +19,15 @@ namespace PangGolf
         public Color tint = new Color(1.02f, 1f, 0.97f, 1f);
         public float flash; // brief white-out, e.g. on a PANGYA
 
+        [Header("Ambient occlusion")]
+        public bool ambientOcclusion = true;
+        public float aoRadius = 1.2f;
+        public float aoIntensity = 0.9f;
+        public float aoStrength = 0.85f;
+        public float aoMaxDistance = 220f;
+
+        Camera cam;
+
         Material mat;
         readonly RenderTexture[] chain = new RenderTexture[8];
 
@@ -27,6 +36,8 @@ namespace PangGolf
             var sh = Shader.Find("Hidden/PangGolf/Post");
             if (sh == null || !sh.isSupported) { enabled = false; return; }
             mat = new Material(sh) { hideFlags = HideFlags.HideAndDontSave };
+            cam = GetComponent<Camera>();
+            cam.depthTextureMode |= DepthTextureMode.Depth;
         }
 
         void OnDestroy()
@@ -51,6 +62,26 @@ namespace PangGolf
             mat.SetFloat("_Contrast", contrast);
             mat.SetFloat("_Vignette", vignette);
             mat.SetColor("_Tint", tint);
+
+            RenderTexture ao = null;
+            if (ambientOcclusion && aoStrength > 0f)
+            {
+                var P = cam.projectionMatrix;
+                mat.SetVector("_ProjInfo", new Vector4(1f / P[0, 0], 1f / P[1, 1], P[0, 0], 0f));
+                mat.SetVector("_AOParams", new Vector4(aoRadius, aoIntensity, 0.002f, aoMaxDistance));
+                var raw = RenderTexture.GetTemporary(src.width / 2, src.height / 2, 0, RenderTextureFormat.ARGB32);
+                ao = RenderTexture.GetTemporary(src.width / 2, src.height / 2, 0, RenderTextureFormat.ARGB32);
+                Graphics.Blit(src, raw, mat, 4);
+                Graphics.Blit(raw, ao, mat, 5);
+                RenderTexture.ReleaseTemporary(raw);
+                mat.SetTexture("_AOTex", ao);
+                mat.SetFloat("_AOStrength", aoStrength);
+            }
+            else
+            {
+                mat.SetTexture("_AOTex", Texture2D.whiteTexture);
+                mat.SetFloat("_AOStrength", 0f);
+            }
 
             var fmt = RenderTextureFormat.DefaultHDR;
             int w = src.width / 2, h = src.height / 2;
@@ -79,6 +110,7 @@ namespace PangGolf
                 RenderTexture.ReleaseTemporary(chain[i]);
                 chain[i] = null;
             }
+            if (ao != null) RenderTexture.ReleaseTemporary(ao);
         }
     }
 }

@@ -4,6 +4,8 @@ Shader "PangGolf/Foliage"
     Properties
     {
         _Color ("Color", Color) = (0.3, 0.6, 0.2, 1)
+        _MainTex ("Leaves (RGB) Alpha (A)", 2D) = "white" {}
+        _Cutoff ("Alpha Cutoff", Range(0, 1)) = 0.45
         _Sway ("Sway", Float) = 0.12
         _Variation ("Variation", Float) = 0.18
         _Rim ("Rim", Float) = 0.35
@@ -11,13 +13,14 @@ Shader "PangGolf/Foliage"
     }
     SubShader
     {
-        Tags { "RenderType" = "Opaque" }
+        Tags { "RenderType" = "TransparentCutout" "Queue" = "AlphaTest" }
         Cull [_Cull]
 
         CGPROGRAM
-        #pragma surface surf WrapLambert vertex:vert addshadow fullforwardshadows
+        #pragma surface surf WrapLambert vertex:vert addshadow fullforwardshadows alphatest:_Cutoff
         #pragma target 3.0
 
+        sampler2D _MainTex;
         fixed4 _Color;
         float _Sway;
         float _Variation;
@@ -25,6 +28,7 @@ Shader "PangGolf/Foliage"
 
         struct Input
         {
+            float2 uv_MainTex;
             float3 viewDir;
             float3 worldNormal;
             float variation;
@@ -59,15 +63,16 @@ Shader "PangGolf/Foliage"
 
         void surf(Input IN, inout SurfaceOutput o)
         {
-            half3 c = _Color.rgb * (1 + (IN.variation - 0.5) * 2 * _Variation);
+            fixed4 tex = tex2D(_MainTex, IN.uv_MainTex);
+            half3 c = tex.rgb * _Color.rgb * (1 + (IN.variation - 0.5) * 2 * _Variation);
             c = lerp(c, c * half3(1.15, 1.08, 0.65), saturate(IN.variation * 2 - 1.2));
             c *= saturate(IN.height * 0.35 + 0.8);
             half rim = pow(1 - saturate(dot(normalize(IN.viewDir), normalize(IN.worldNormal))), 3) * _Rim;
             o.Albedo = c;
             o.Emission = c * rim;
-            o.Alpha = 1;
+            o.Alpha = tex.a;
         }
         ENDCG
     }
-    Fallback "Diffuse"
+    Fallback "Legacy Shaders/Transparent/Cutout/Diffuse"
 }
