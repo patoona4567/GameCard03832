@@ -46,6 +46,8 @@ namespace PangGolf
 
         Transform ball;
         TrailRenderer trail;
+        PostFX post;
+        ReflectionProbe probe;
         LineRenderer ring;
         GreenGrid grid;
         BallSim preview;
@@ -113,7 +115,9 @@ namespace PangGolf
             c.allowHDR = true;
             c.allowMSAA = true;
             c.clearFlags = CameraClearFlags.Skybox;
+            c.depthTextureMode = DepthTextureMode.Depth; // water shoreline foam
             camGo.AddComponent<AudioListener>();
+            post = camGo.AddComponent<PostFX>();
             cam = camGo.AddComponent<GolfCamera>();
             cam.Init(this);
 
@@ -124,6 +128,7 @@ namespace PangGolf
 
             BuildBall();
             BuildRing();
+            BuildProbe();
             gameObject.AddComponent<GolfHUD>().Init(this);
 
             foreach (var club in Clubs.All) club.SpeedFor(1f); // calibrate up front
@@ -145,7 +150,8 @@ namespace PangGolf
 
         void BuildBall()
         {
-            var go = ProcGen.Prim(PrimitiveType.Sphere, transform, ProcGen.Lit(Color.white, 0.75f));
+            var go = ProcGen.Prim(PrimitiveType.Sphere, transform, ProcGen.Emissive(Color.white, new Color(0.18f, 0.18f, 0.2f)));
+            go.GetComponent<MeshRenderer>().sharedMaterial.SetFloat("_Glossiness", 0.85f);
             go.name = "Ball";
             go.transform.localScale = Vector3.one * (BallSim.Radius * 2f);
             ball = go.transform;
@@ -179,14 +185,32 @@ namespace PangGolf
             ring.startColor = ring.endColor = new Color(1f, 0.92f, 0.25f, 0.95f);
         }
 
+        void BuildProbe()
+        {
+            var go = new GameObject("ReflectionProbe");
+            go.transform.SetParent(transform, false);
+            go.transform.position = new Vector3(Course.Size * 0.5f, Course.BaseH + 25f, Course.Size * 0.5f);
+            probe = go.AddComponent<ReflectionProbe>();
+            probe.mode = ReflectionProbeMode.Realtime;
+            probe.refreshMode = ReflectionProbeRefreshMode.ViaScripting;
+            probe.timeSlicingMode = ReflectionProbeTimeSlicingMode.NoTimeSlicing;
+            probe.size = new Vector3(4000f, 1200f, 4000f);
+            probe.resolution = 128;
+            probe.hdr = true;
+            probe.clearFlags = ReflectionProbeClearFlags.Skybox;
+            probe.farClipPlane = 3000f;
+            probe.importance = 1;
+        }
+
         void LoadHole(int index)
         {
             holeIndex = index;
-            if (course != null) Destroy(course.gameObject);
+            if (course != null) { course.gameObject.SetActive(false); Destroy(course.gameObject); }
             course = Course.Build(Holes.All[index], transform);
             sim = new BallSim(course);
             preview = new BallSim(new PreviewGround(course));
             grid = GreenGrid.Build(course);
+            if (probe != null) probe.RenderProbe();
             strokes = 0;
             lie = Surface.Tee;
             PlaceBall(course.TeePos);
@@ -525,11 +549,15 @@ namespace PangGolf
             {
                 sfx.Perfect();
                 fx.Sparkle(BallPos);
+                fx.Shockwave(BallPos, powerArmed ? new Color(1f, 0.55f, 0.2f) : new Color(0.4f, 1f, 1f));
+                cam.Kick(powerArmed ? 1.3f : 1f);
+                if (post != null) post.flash = powerArmed ? 0.7f : 0.45f;
                 Big("PANGYA!", powerArmed ? SpecialName(special) : "", new Color(0.5f, 1f, 1f), 1.6f);
                 if (powerSlots < MaxPowerSlots) powerSlots++;
             }
             else
             {
+                cam.Kick(0.35f);
                 if (miss < 0.03f) { sfx.Hit(p); Toast("Nice shot"); }
                 else { sfx.Miss(); Toast(sign > 0 ? "Too early - hook!" : "Too late - slice!"); }
             }
@@ -629,6 +657,8 @@ namespace PangGolf
             Color col = diff < 0 ? new Color(1f, 0.85f, 0.2f) : diff == 0 ? new Color(0.6f, 1f, 0.6f) : new Color(0.85f, 0.85f, 1f);
             if (diff < 0 || strokes == 1)
             {
+                cam.Kick(0.6f);
+                if (post != null) post.flash = 0.5f;
                 fx.Confetti(course.Cup);
                 sfx.Cheer();
                 if (powerSlots < MaxPowerSlots) powerSlots++;

@@ -9,7 +9,9 @@ namespace PangGolf
         bool ready;
         float W, H;
 
-        Texture2D white, panel, panelLight, fill, ballTex, dotTex, arrowTex, ringTex, vignette;
+        Texture2D white, panelLight, fill, ballTex, dotTex, arrowTex, ringTex, vignette;
+        GUIStyle panelStyle, trackStyle;
+        Texture2D gloss;
         GUIStyle txt, txtSmall, txtBig, txtHuge, txtCenter, txtClub;
 
         public void Init(GolfGame game) { g = game; }
@@ -17,7 +19,6 @@ namespace PangGolf
         void Setup()
         {
             white = ProcGen.Solid(Color.white);
-            panel = ProcGen.Solid(new Color(0.04f, 0.07f, 0.16f, 0.62f));
             panelLight = ProcGen.Solid(new Color(1f, 1f, 1f, 0.12f));
             fill = ProcGen.HorizontalGradient(new Color(1f, 0.9f, 0.25f), new Color(1f, 0.25f, 0.15f));
             ballTex = ProcGen.Circle(128, new Color(0.97f, 0.97f, 0.98f), new Color(0.25f, 0.3f, 0.45f), 6f);
@@ -25,6 +26,14 @@ namespace PangGolf
             ringTex = ProcGen.Circle(128, new Color(0.04f, 0.07f, 0.16f, 0.62f), new Color(0.6f, 0.85f, 1f, 0.9f), 4f);
             arrowTex = ProcGen.Arrow(64, new Color(0.45f, 0.92f, 1f));
             vignette = ProcGen.VerticalGradient(new Color(0.02f, 0.05f, 0.15f, 0.2f), new Color(0.02f, 0.05f, 0.15f, 0.85f));
+            gloss = ProcGen.VerticalGradient(new Color(1f, 1f, 1f, 0.45f), new Color(1f, 1f, 1f, 0f), 32);
+
+            var panelTex = ProcGen.RoundedRect(64, 14, new Color(0.1f, 0.18f, 0.36f, 0.78f), new Color(0.03f, 0.06f, 0.16f, 0.82f), new Color(0.55f, 0.8f, 1f, 0.75f), 2);
+            panelStyle = new GUIStyle { border = new RectOffset(18, 18, 18, 18) };
+            panelStyle.normal.background = panelTex;
+            var trackTex = ProcGen.RoundedRect(32, 8, new Color(0.05f, 0.08f, 0.15f, 0.9f), new Color(0.15f, 0.2f, 0.3f, 0.9f), new Color(1f, 1f, 1f, 0.6f), 2);
+            trackStyle = new GUIStyle { border = new RectOffset(10, 10, 10, 10) };
+            trackStyle.normal.background = trackTex;
 
             txt = new GUIStyle(GUI.skin.label) { fontSize = 18, fontStyle = FontStyle.Bold, wordWrap = false };
             txtSmall = new GUIStyle(txt) { fontSize = 14, fontStyle = FontStyle.Normal };
@@ -61,7 +70,8 @@ namespace PangGolf
             GUI.DrawTexture(new Rect(0, 0, W, H), vignette);
             float pulse = 1f + 0.04f * Mathf.Sin(Time.time * 3f);
             var big = new GUIStyle(txtHuge) { fontSize = Mathf.RoundToInt(96 * pulse) };
-            Text(new Rect(0, 150, W, 120), "PANG GOLF", big, new Color(1f, 0.88f, 0.25f));
+            Outlined(new Rect(4, 156, W, 120), "PANG GOLF", big, new Color(0f, 0f, 0f, 0.5f), new Color(0f, 0f, 0f, 0.35f), 4f);
+            Outlined(new Rect(0, 150, W, 120), "PANG GOLF", big, new Color(1f, 0.88f, 0.25f), new Color(0.55f, 0.2f, 0.05f), 3f);
             Text(new Rect(0, 255, W, 40), "Fantasy golf  -  " + Holes.All.Length + " holes", txtBig, new Color(0.8f, 0.95f, 1f));
             float blink = 0.6f + 0.4f * Mathf.Sin(Time.time * 5f);
             Text(new Rect(0, 360, W, 40), "Press  ENTER  or  SPACE  to tee off", txtBig, new Color(1f, 1f, 1f, blink));
@@ -238,7 +248,7 @@ namespace PangGolf
             System.Func<float, float> X = v => gx + (v - lo) / (1f - lo) * gw;
 
             Box(new Rect(gx - 12, gy - 40, gw + 24, gh + 60));
-            GUI.DrawTexture(new Rect(gx, gy, gw, gh), panelLight);
+            Track(new Rect(gx - 4, gy - 4, gw + 8, gh + 8));
 
             // Impact zones
             float zone = club.perfectZone * (g.powerArmed ? 0.6f : 1f);
@@ -251,7 +261,10 @@ namespace PangGolf
             // Power fill
             float shown = ga.phase == ShotGauge.Phase.Power ? ga.marker : ga.phase == ShotGauge.Phase.Impact ? ga.power : 0f;
             if (shown > 0f)
+            {
                 GUI.DrawTextureWithTexCoords(new Rect(X(0f), gy + 4, X(shown) - X(0f), gh - 8), fill, new Rect(0, 0, shown, 1));
+                GUI.DrawTexture(new Rect(X(0f), gy + 4, X(shown) - X(0f), (gh - 8) * 0.5f), gloss);
+            }
             if (ga.phase == ShotGauge.Phase.Impact)
             {
                 GUI.color = new Color(1f, 0.2f, 0.2f);
@@ -322,7 +335,7 @@ namespace PangGolf
                 float alpha = Mathf.Clamp01(g.bigTimer * 2f);
                 var st = new GUIStyle(txtHuge) { fontSize = Mathf.RoundToInt(70 * pop) };
                 Color c = g.bigColor; c.a = alpha;
-                Text(new Rect(0, H * 0.3f - 60, W, 120), g.bigText, st, c);
+                Outlined(new Rect(0, H * 0.3f - 60, W, 120), g.bigText, st, c, new Color(0.05f, 0.08f, 0.2f, alpha * 0.85f), 3f);
                 if (!string.IsNullOrEmpty(g.subText))
                     Text(new Rect(0, H * 0.3f + 45, W, 40), g.subText, txtBig, new Color(1f, 1f, 1f, alpha));
             }
@@ -379,7 +392,29 @@ namespace PangGolf
 
         static string ToPar(int d) { return d == 0 ? "E" : d > 0 ? "+" + d : d.ToString(); }
 
-        void Box(Rect r) { GUI.DrawTexture(r, panel); }
+        void Box(Rect r)
+        {
+            if (Event.current.type == EventType.Repaint) panelStyle.Draw(r, false, false, false, false);
+        }
+
+        void Track(Rect r)
+        {
+            if (Event.current.type == EventType.Repaint) trackStyle.Draw(r, false, false, false, false);
+        }
+
+        static void Outlined(Rect r, string t, GUIStyle st, Color c, Color outline, float w)
+        {
+            Color old = st.normal.textColor;
+            st.normal.textColor = outline;
+            for (int i = 0; i < 8; i++)
+            {
+                float a = i * Mathf.PI / 4f;
+                GUI.Label(new Rect(r.x + Mathf.Cos(a) * w, r.y + Mathf.Sin(a) * w, r.width, r.height), t, st);
+            }
+            st.normal.textColor = c;
+            GUI.Label(r, t, st);
+            st.normal.textColor = old;
+        }
 
         // RotateAroundPivot works in screen space, so convert from our scaled GUI space first.
         static void Rotate(float angle, Vector2 pivot)

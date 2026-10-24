@@ -13,8 +13,25 @@ namespace PangGolf
         Vector3 look;
         bool snap = true;
 
-        public void Init(GolfGame g) { game = g; }
+        float kick, shake;
+        Camera cam;
+        float baseFov = 55f;
+
+        public void Init(GolfGame g)
+        {
+            game = g;
+            cam = GetComponent<Camera>();
+            if (cam != null) baseFov = cam.fieldOfView;
+        }
+
         public void Snap() { snap = true; }
+
+        /// <summary>FOV punch + shake, e.g. on a powerful hit.</summary>
+        public void Kick(float strength)
+        {
+            kick = Mathf.Max(kick, strength);
+            shake = Mathf.Max(shake, strength * 0.5f);
+        }
 
         void LateUpdate()
         {
@@ -114,6 +131,15 @@ namespace PangGolf
 
             Vector3 fwdLook = look - transform.position;
             if (fwdLook.sqrMagnitude > 1e-4f) transform.rotation = Quaternion.LookRotation(fwdLook, Vector3.up);
+
+            kick = Mathf.MoveTowards(kick, 0f, dt * 2.2f);
+            shake = Mathf.MoveTowards(shake, 0f, dt * 1.6f);
+            if (cam != null) cam.fieldOfView = baseFov - kick * 7f;
+            if (shake > 0f)
+            {
+                float t = Time.time * 40f;
+                transform.rotation *= Quaternion.Euler(Mathf.Sin(t) * shake * 0.8f, Mathf.Cos(t * 1.3f) * shake * 0.8f, 0f);
+            }
         }
     }
 }

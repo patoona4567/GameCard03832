@@ -2,10 +2,19 @@ using UnityEngine;
 
 namespace PangGolf
 {
+    /// <summary>Slowly drifts the cloud layer with the breeze and wraps it back.</summary>
     public class CloudDrift : MonoBehaviour
     {
-        float speed;
-        void Start() { speed = Random.Range(0.6f, 1.6f); }
-        void Update() { transform.position += new Vector3(speed, 0f, speed * 0.3f) * Time.deltaTime; }
+        Vector3 origin;
+        float offset;
+
+        void Start() { origin = transform.position; }
+
+        void Update()
+        {
+            offset = Mathf.Repeat(offset + Time.deltaTime * 1.5f, 600f);
+            float k = offset < 300f ? offset : 600f - offset; // ping-pong so the sky never jumps
+            transform.position = origin + new Vector3(k, 0f, k * 0.35f);
+        }
     }
 }

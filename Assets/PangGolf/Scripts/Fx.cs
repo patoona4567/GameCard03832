@@ -6,9 +6,11 @@ namespace PangGolf
     public class Fx : MonoBehaviour
     {
         ParticleSystem sparkle, sand, water, confetti, dust;
+        Material ringMat;
 
         void Awake()
         {
+            ringMat = ProcGen.Unlit(Color.white);
             var mat = ProcGen.Particle(ProcGen.SoftDot());
             sparkle = Make("Sparkle", mat, 60, 0.9f, 3f, 7f, 0.1f, 0.35f, new Color(1f, 0.95f, 0.4f), new Color(0.6f, 1f, 1f), -0.1f, 0.2f);
             sand = Make("Sand", mat, 45, 1.0f, 2f, 5f, 0.08f, 0.25f, new Color(0.95f, 0.87f, 0.65f), new Color(0.85f, 0.75f, 0.5f), 1f, 0.3f);
@@ -77,6 +79,43 @@ namespace PangGolf
         }
 
         public void Sparkle(Vector3 p) { Burst(sparkle, p); }
+
+        /// <summary>Expanding glowing ring on the ground (PANGYA impact).</summary>
+        public void Shockwave(Vector3 p, Color c)
+        {
+            StartCoroutine(Ring(p, c));
+        }
+
+        System.Collections.IEnumerator Ring(Vector3 p, Color c)
+        {
+            var go = new GameObject("Shockwave");
+            go.transform.SetParent(transform, false);
+            var lr = go.AddComponent<LineRenderer>();
+            lr.sharedMaterial = ringMat;
+            lr.useWorldSpace = true;
+            lr.loop = true;
+            lr.positionCount = 40;
+            lr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            lr.receiveShadows = false;
+            float t = 0f;
+            while (t < 0.6f)
+            {
+                t += Time.deltaTime;
+                float k = t / 0.6f;
+                float r = Mathf.Lerp(0.2f, 5f, 1f - (1f - k) * (1f - k));
+                for (int i = 0; i < 40; i++)
+                {
+                    float a = i * Mathf.PI * 2f / 40f;
+                    lr.SetPosition(i, p + new Vector3(Mathf.Cos(a) * r, 0.08f, Mathf.Sin(a) * r));
+                }
+                lr.widthMultiplier = Mathf.Lerp(0.35f, 0.02f, k);
+                Color cc = c; cc.a = 1f - k;
+                lr.startColor = lr.endColor = cc;
+                yield return null;
+            }
+            Destroy(go);
+        }
+
         public void Sand(Vector3 p) { Burst(sand, p); }
         public void Water(Vector3 p) { Burst(water, p); }
         public void Confetti(Vector3 p) { Burst(confetti, p + Vector3.up * 0.5f); }

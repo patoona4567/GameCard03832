@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -78,6 +79,45 @@ namespace PangGolf
                 m.EnableKeyword("_ALPHABLEND_ON");
                 m.renderQueue = (int)RenderQueue.Transparent;
             }
+            return m;
+        }
+
+        /// <summary>Finds one of our custom shaders; returns null if missing or failed to compile.</summary>
+        public static Shader Custom(string name)
+        {
+            var sh = Shader.Find(name);
+            return sh != null && sh.isSupported ? sh : null;
+        }
+
+        /// <summary>Wind-swayed foliage with colour variation, falls back to Standard.</summary>
+        public static Material Foliage(Color c, float sway = 0.12f, bool doubleSided = false)
+        {
+            var sh = Custom("PangGolf/Foliage");
+            if (sh == null) return Lit(c, 0.1f);
+            var m = new Material(sh);
+            m.color = c;
+            m.SetFloat("_Sway", sway);
+            m.SetFloat("_Cull", doubleSided ? 0f : 2f);
+            m.enableInstancing = true;
+            return m;
+        }
+
+        /// <summary>Lambert lit material driven by mesh vertex colours.</summary>
+        public static Material VertexLit()
+        {
+            var sh = Custom("PangGolf/VertexLit");
+            if (sh == null) return Lit(new Color(0.4f, 0.5f, 0.42f), 0.05f);
+            var m = new Material(sh);
+            m.enableInstancing = true;
+            return m;
+        }
+
+        public static Material Water()
+        {
+            var sh = Custom("PangGolf/Water");
+            if (sh == null) return Transparent(new Color(0.08f, 0.42f, 0.62f, 0.78f), 0.96f);
+            var m = new Material(sh);
+            m.SetTexture("_NormalTex", NormalMap(256, 9, 6f, 0.9f, 0));
             return m;
         }
 
@@ -188,8 +228,233 @@ namespace PangGolf
                 tris[t] = v; tris[t + 1] = v + 1; tris[t + 2] = v + 2;
                 tris[t + 3] = v; tris[t + 4] = v + 2; tris[t + 5] = v + 3;
             }
-            var m = new Mesh { vertices = verts, triangles = tris };
+            var uvs = new Vector2[verts.Length];
+            for (int i = 0; i < verts.Length; i++) uvs[i] = new Vector2(verts[i].x / 10f, verts[i].z / 10f);
+            var m = new Mesh { vertices = verts, triangles = tris, uv = uvs };
             m.RecalculateNormals();
+            m.RecalculateBounds();
+            return m;
+        }
+
+        /// <summary>Polar grid disc (radius 1) with enough vertices for vertex waves.</summary>
+        public static Mesh DiscGrid(int rings = 24, int segments = 64)
+        {
+            var verts = new List<Vector3> { Vector3.zero };
+            var tris = new List<int>();
+            for (int r = 1; r <= rings; r++)
+            {
+                float rad = (float)r / rings;
+                for (int s = 0; s < segments; s++)
+                {
+                    float a = s * Mathf.PI * 2f / segments;
+                    verts.Add(new Vector3(Mathf.Cos(a) * rad, 0f, Mathf.Sin(a) * rad));
+                }
+            }
+            for (int s = 0; s < segments; s++)
+            {
+                tris.Add(0); tris.Add(1 + (s + 1) % segments); tris.Add(1 + s);
+            }
+            for (int r = 1; r < rings; r++)
+            {
+                int a0 = 1 + (r - 1) * segments, b0 = 1 + r * segments;
+                for (int s = 0; s < segments; s++)
+                {
+                    int s1 = (s + 1) % segments;
+                    tris.Add(a0 + s); tris.Add(a0 + s1); tris.Add(b0 + s1);
+                    tris.Add(a0 + s); tris.Add(b0 + s1); tris.Add(b0 + s);
+                }
+            }
+            var m = new Mesh();
+            m.SetVertices(verts);
+            m.SetTriangles(tris, 0);
+            m.RecalculateNormals();
+            m.RecalculateBounds();
+            return m;
+        }
+
+        /// <summary>Noisy mountain with vertex colours (grass, rock, snow). Base radius 1, height 1.</summary>
+        public static Mesh Mountain(int seed, bool snowy)
+        {
+            const int rings = 18, segs = 40;
+            var verts = new List<Vector3>();
+            var cols = new List<Color>();
+            var tris = new List<int>();
+            float o = seed * 9.73f;
+            for (int r = 0; r <= rings; r++)
+            {
+                float rad = (float)r / rings;
+                for (int s = 0; s < segs; s++)
+                {
+                    float a = s * Mathf.PI * 2f / segs;
+                    float nx = Mathf.Cos(a), nz = Mathf.Sin(a);
+                    float n = Mathf.PerlinNoise(o + nx * 1.7f + rad * 2.3f, o + nz * 1.7f + rad * 1.9f);
+                    float ridge = 1f - Mathf.Abs(Mathf.PerlinNoise(o + a * 1.3f, rad * 3f) * 2f - 1f);
+                    float h = Mathf.Pow(1f - rad, 1.5f) * (0.75f + 0.45f * n) + ridge * 0.08f * (1f - rad);
+                    if (r == rings) h = 0f;
+                    float rr = rad * (0.85f + 0.3f * n);
+                    verts.Add(new Vector3(nx * rr, h, nz * rr));
+                    Color grass = Color.Lerp(new Color(0.24f, 0.42f, 0.22f), new Color(0.32f, 0.5f, 0.28f), n);
+                    Color rock = Color.Lerp(new Color(0.42f, 0.42f, 0.44f), new Color(0.55f, 0.53f, 0.5f), ridge);
+                    Color c = Color.Lerp(grass, rock, Mathf.InverseLerp(0.3f, 0.6f, h + (n - 0.5f) * 0.15f));
+                    if (snowy) c = Color.Lerp(c, new Color(0.96f, 0.97f, 1f), Mathf.InverseLerp(0.68f, 0.78f, h + (n - 0.5f) * 0.1f));
+                    cols.Add(c);
+                }
+            }
+            for (int r = 0; r < rings; r++)
+            {
+                for (int s = 0; s < segs; s++)
+                {
+                    int s1 = (s + 1) % segs;
+                    int a0 = r * segs + s, a1 = r * segs + s1, b0 = (r + 1) * segs + s, b1 = (r + 1) * segs + s1;
+                    tris.Add(a0); tris.Add(a1); tris.Add(b1);
+                    tris.Add(a0); tris.Add(b1); tris.Add(b0);
+                }
+            }
+            var m = new Mesh();
+            m.SetVertices(verts);
+            m.SetColors(cols);
+            m.SetTriangles(tris, 0);
+            m.RecalculateNormals();
+            m.RecalculateBounds();
+            return m;
+        }
+
+        /// <summary>Lumpy rock: a noisy sphere with grey vertex colours.</summary>
+        public static Mesh Rock(int seed)
+        {
+            var src = Resources.GetBuiltinResource<Mesh>("New-Sphere.fbx");
+            Vector3[] baseVerts = src != null ? src.vertices : null;
+            int[] baseTris = src != null ? src.triangles : null;
+            if (baseVerts == null || baseVerts.Length == 0) return null;
+            float o = seed * 3.31f;
+            var verts = new Vector3[baseVerts.Length];
+            var cols = new Color[baseVerts.Length];
+            for (int i = 0; i < baseVerts.Length; i++)
+            {
+                Vector3 v = baseVerts[i].normalized;
+                float n = Mathf.PerlinNoise(o + v.x * 1.8f + v.y, o + v.z * 1.8f - v.y);
+                float k = 0.75f + 0.5f * n;
+                verts[i] = new Vector3(v.x * k, Mathf.Max(v.y * k * 0.7f, -0.2f), v.z * k);
+                float g = 0.42f + 0.25f * n + (v.y > 0.6f ? 0.05f : 0f);
+                cols[i] = v.y > 0.7f && n > 0.55f ? new Color(0.35f, 0.5f, 0.25f) : new Color(g, g * 0.98f, g * 0.94f);
+            }
+            var m = new Mesh { vertices = verts, colors = cols, triangles = baseTris };
+            m.RecalculateNormals();
+            m.RecalculateBounds();
+            return m;
+        }
+
+        /// <summary>Duplicates triangles with flipped winding/normals so a thin mesh renders from both sides.</summary>
+        public static void MakeDoubleSided(List<Vector3> verts, List<Vector3> norms, List<int> tris)
+        {
+            int n = verts.Count, t = tris.Count;
+            for (int i = 0; i < n; i++) { verts.Add(verts[i]); norms.Add(-norms[i]); }
+            for (int i = 0; i < t; i += 3) { tris.Add(tris[i] + n); tris.Add(tris[i + 2] + n); tris.Add(tris[i + 1] + n); }
+        }
+
+        /// <summary>Palm crown: drooping fronds radiating from the origin.</summary>
+        public static Mesh PalmFronds(int fronds, int seed)
+        {
+            var rnd = new System.Random(seed);
+            var verts = new List<Vector3>();
+            var norms = new List<Vector3>();
+            var tris = new List<int>();
+            const int segs = 7;
+            for (int f = 0; f < fronds; f++)
+            {
+                float yaw = f * Mathf.PI * 2f / fronds + (float)rnd.NextDouble() * 0.4f;
+                float len = 3.2f + (float)rnd.NextDouble() * 1.2f;
+                float droop = 0.9f + (float)rnd.NextDouble() * 0.6f;
+                Vector3 dir = new Vector3(Mathf.Cos(yaw), 0f, Mathf.Sin(yaw));
+                Vector3 side = new Vector3(-dir.z, 0f, dir.x);
+                int b = verts.Count;
+                for (int i = 0; i <= segs; i++)
+                {
+                    float t = (float)i / segs;
+                    Vector3 spine = dir * (len * t) + Vector3.up * (0.6f * t - droop * t * t * 1.4f);
+                    float w = Mathf.Sin(Mathf.PI * Mathf.Min(1f, t * 1.15f + 0.05f)) * 0.55f;
+                    Vector3 nrm = Vector3.Cross(side, dir * len + Vector3.up * (0.6f - 2.8f * droop * t)).normalized;
+                    if (nrm.y < 0f) nrm = -nrm;
+                    verts.Add(spine - side * w + Vector3.down * w * 0.25f); norms.Add(nrm);
+                    verts.Add(spine); norms.Add(nrm);
+                    verts.Add(spine + side * w + Vector3.down * w * 0.25f); norms.Add(nrm);
+                }
+                for (int i = 0; i < segs; i++)
+                {
+                    int r0 = b + i * 3, r1 = b + (i + 1) * 3;
+                    tris.Add(r0); tris.Add(r0 + 1); tris.Add(r1 + 1);
+                    tris.Add(r0); tris.Add(r1 + 1); tris.Add(r1);
+                    tris.Add(r0 + 1); tris.Add(r0 + 2); tris.Add(r1 + 2);
+                    tris.Add(r0 + 1); tris.Add(r1 + 2); tris.Add(r1 + 1);
+                }
+            }
+            MakeDoubleSided(verts, norms, tris);
+            var m = new Mesh();
+            m.SetVertices(verts);
+            m.SetNormals(norms);
+            m.SetTriangles(tris, 0);
+            m.RecalculateBounds();
+            return m;
+        }
+
+        /// <summary>Curved palm trunk made of rings, height ~h, leaning along +x.</summary>
+        public static Mesh PalmTrunk(float h, float lean)
+        {
+            const int rings = 10, segs = 8;
+            var verts = new List<Vector3>();
+            var tris = new List<int>();
+            for (int r = 0; r <= rings; r++)
+            {
+                float t = (float)r / rings;
+                Vector3 c = new Vector3(lean * t * t, h * t, 0f);
+                float rad = Mathf.Lerp(0.28f, 0.16f, t) * (r % 2 == 0 ? 1.08f : 1f);
+                for (int s = 0; s < segs; s++)
+                {
+                    float a = s * Mathf.PI * 2f / segs;
+                    verts.Add(c + new Vector3(Mathf.Cos(a) * rad, 0f, Mathf.Sin(a) * rad));
+                }
+            }
+            for (int r = 0; r < rings; r++)
+                for (int s = 0; s < segs; s++)
+                {
+                    int s1 = (s + 1) % segs;
+                    int a0 = r * segs + s, a1 = r * segs + s1, b0 = (r + 1) * segs + s, b1 = (r + 1) * segs + s1;
+                    tris.Add(a0); tris.Add(b1); tris.Add(a1);
+                    tris.Add(a0); tris.Add(b0); tris.Add(b1);
+                }
+            var m = new Mesh();
+            m.SetVertices(verts);
+            m.SetTriangles(tris, 0);
+            m.RecalculateNormals();
+            m.RecalculateBounds();
+            return m;
+        }
+
+        /// <summary>Subdivided rectangle (0..w along +z, 0..-h along -y) used for the waving flag.</summary>
+        public static Mesh FlagMesh(int cols, int rows, float w, float h)
+        {
+            var verts = new List<Vector3>();
+            var norms = new List<Vector3>();
+            var tris = new List<int>();
+            for (int y = 0; y <= rows; y++)
+                for (int x = 0; x <= cols; x++)
+                {
+                    verts.Add(new Vector3(0f, -h * y / rows, w * x / cols));
+                    norms.Add(Vector3.right);
+                }
+            for (int y = 0; y < rows; y++)
+                for (int x = 0; x < cols; x++)
+                {
+                    int i = y * (cols + 1) + x;
+                    tris.Add(i); tris.Add(i + 1); tris.Add(i + cols + 2);
+                    tris.Add(i); tris.Add(i + cols + 2); tris.Add(i + cols + 1);
+                }
+            MakeDoubleSided(verts, norms, tris);
+            var m = new Mesh();
+            m.MarkDynamic();
+            m.SetVertices(verts);
+            m.SetNormals(norms);
+            m.SetTriangles(tris, 0);
             m.RecalculateBounds();
             return m;
         }
@@ -260,31 +525,150 @@ namespace PangGolf
             return Mathf.Lerp(ab, cd, v);
         }
 
-        /// <summary>Alpha texture with a few grass blades for terrain detail billboards.</summary>
-        public static Texture2D GrassBlades(int size = 64)
+        /// <summary>Alpha texture with grass blades (optionally with flower heads) for terrain detail billboards.</summary>
+        public static Texture2D GrassBlades(int size = 64, int seed = 5, bool flowers = false)
         {
             var t = new Texture2D(size, size, TextureFormat.RGBA32, true);
             var px = new Color[size * size];
-            for (int i = 0; i < px.Length; i++) px[i] = new Color(1, 1, 1, 0);
-            var rnd = new System.Random(5);
-            for (int b = 0; b < 9; b++)
+            for (int i = 0; i < px.Length; i++) px[i] = new Color(0.4f, 0.6f, 0.3f, 0);
+            var rnd = new System.Random(seed);
+            Color[] petals = { new Color(1f, 0.45f, 0.65f), new Color(1f, 0.9f, 0.3f), new Color(1f, 1f, 1f), new Color(0.7f, 0.55f, 1f) };
+            int blades = flowers ? 6 : 11;
+            for (int b = 0; b < blades; b++)
             {
                 float x0 = (float)(rnd.NextDouble() * 0.8 + 0.1) * size;
-                float lean = (float)(rnd.NextDouble() - 0.5) * size * 0.4f;
-                float h = (float)(rnd.NextDouble() * 0.4 + 0.6) * size;
-                float w = size * 0.05f;
+                float lean = (float)(rnd.NextDouble() - 0.5) * size * 0.45f;
+                float h = (float)(rnd.NextDouble() * 0.45 + 0.5) * size * (flowers ? 0.8f : 1f);
+                float w = size * (flowers ? 0.025f : 0.045f);
+                float tint = (float)rnd.NextDouble() * 0.2f;
+                float cx = x0;
                 for (int y = 0; y < (int)h; y++)
                 {
                     float f = y / h;
-                    float cx = x0 + lean * f * f;
-                    float hw = w * (1f - f) + 0.5f;
+                    cx = x0 + lean * f * f;
+                    float hw = w * (1f - f * 0.9f) + 0.5f;
                     for (int x = Mathf.Max(0, (int)(cx - hw)); x <= Mathf.Min(size - 1, (int)(cx + hw)); x++)
                     {
-                        float shade = 0.65f + 0.35f * f;
-                        px[y * size + x] = new Color(shade, shade, shade, 1f);
+                        float shade = 0.55f + 0.45f * f + tint;
+                        px[y * size + x] = flowers ? new Color(0.35f * shade, 0.6f * shade, 0.25f * shade, 1f) : new Color(shade, shade, shade, 1f);
                     }
                 }
+                if (flowers)
+                {
+                    Color pc = petals[rnd.Next(petals.Length)];
+                    int r = Mathf.Max(2, size / 14);
+                    int fy = (int)h;
+                    for (int y = -r; y <= r; y++)
+                        for (int x = -r; x <= r; x++)
+                        {
+                            if (x * x + y * y > r * r) continue;
+                            int xx = (int)cx + x, yy = fy + y;
+                            if (xx < 0 || yy < 0 || xx >= size || yy >= size) continue;
+                            bool centre = x * x + y * y <= (r / 2) * (r / 2);
+                            px[yy * size + xx] = centre ? new Color(1f, 0.8f, 0.2f, 1f) : pc;
+                        }
+                }
             }
+            t.SetPixels(px);
+            t.wrapMode = TextureWrapMode.Clamp;
+            t.Apply(true);
+            return t;
+        }
+
+        /// <summary>
+        /// Tileable normal map from fractal noise. Stored as RGB = normal (A = 1), which
+        /// UnpackNormal decodes correctly on both DXT5nm and plain RGB platforms.
+        /// </summary>
+        public static Texture2D NormalMap(int size, float scale, float strength, float detail, int seed, float ripples = 0f)
+        {
+            var hgt = new float[size * size];
+            for (int y = 0; y < size; y++)
+                for (int x = 0; x < size; x++)
+                {
+                    float u = (float)x / size, v = (float)y / size;
+                    float h = TileNoise(u, v, scale, seed) + TileNoise(u, v, scale * 3f, seed + 3) * 0.5f * detail
+                              + Hash(x, y, seed) * 0.15f * detail;
+                    if (ripples > 0f) h += Mathf.Sin((u * 6f + TileNoise(u, v, 3f, seed + 9) * 0.6f) * Mathf.PI * 2f * ripples) * 0.35f;
+                    hgt[y * size + x] = h;
+                }
+            var t = new Texture2D(size, size, TextureFormat.RGBA32, true, true);
+            var px = new Color[size * size];
+            for (int y = 0; y < size; y++)
+                for (int x = 0; x < size; x++)
+                {
+                    float l = hgt[y * size + (x + size - 1) % size], r = hgt[y * size + (x + 1) % size];
+                    float d = hgt[((y + size - 1) % size) * size + x], u = hgt[((y + 1) % size) * size + x];
+                    Vector3 n = new Vector3((l - r) * strength, (d - u) * strength, 1f).normalized;
+                    px[y * size + x] = new Color(n.x * 0.5f + 0.5f, n.y * 0.5f + 0.5f, n.z * 0.5f + 0.5f, 1f);
+                }
+            t.SetPixels(px);
+            t.wrapMode = TextureWrapMode.Repeat;
+            t.filterMode = FilterMode.Trilinear;
+            t.anisoLevel = 8;
+            t.Apply(true);
+            return t;
+        }
+
+        /// <summary>Soft puffy cloud sprite.</summary>
+        public static Texture2D CloudPuff(int size = 128)
+        {
+            var t = new Texture2D(size, size, TextureFormat.RGBA32, true);
+            var px = new Color[size * size];
+            for (int y = 0; y < size; y++)
+                for (int x = 0; x < size; x++)
+                {
+                    float dx = (x + 0.5f) / size * 2f - 1f, dy = (y + 0.5f) / size * 2f - 1f;
+                    float d = Mathf.Sqrt(dx * dx + dy * dy);
+                    float n = Mathf.PerlinNoise(x * 0.06f, y * 0.06f) * 0.6f + Mathf.PerlinNoise(x * 0.15f + 7f, y * 0.15f) * 0.4f;
+                    float a = Mathf.Clamp01((1f - d) * 1.6f - (1f - n) * 0.55f);
+                    a = a * a * (3f - 2f * a);
+                    float shade = Mathf.Lerp(0.82f, 1f, Mathf.Clamp01(dy * 0.5f + 0.6f + (n - 0.5f) * 0.4f));
+                    px[y * size + x] = new Color(shade, shade, shade * 1.02f, a);
+                }
+            t.SetPixels(px);
+            t.wrapMode = TextureWrapMode.Clamp;
+            t.Apply(true);
+            return t;
+        }
+
+        /// <summary>Rounded rectangle for 9-sliced HUD panels.</summary>
+        public static Texture2D RoundedRect(int size, int radius, Color top, Color bottom, Color border, int borderWidth)
+        {
+            var t = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            var px = new Color[size * size];
+            for (int y = 0; y < size; y++)
+                for (int x = 0; x < size; x++)
+                {
+                    float cx = Mathf.Clamp(x + 0.5f, radius, size - radius);
+                    float cy = Mathf.Clamp(y + 0.5f, radius, size - radius);
+                    float d = Mathf.Sqrt((x + 0.5f - cx) * (x + 0.5f - cx) + (y + 0.5f - cy) * (y + 0.5f - cy));
+                    float inside = Mathf.Clamp01(radius - d + 0.5f);
+                    float edge = Mathf.Clamp01(d - (radius - borderWidth) + 0.5f);
+                    Color fill = Color.Lerp(bottom, top, (float)y / (size - 1));
+                    Color c = Color.Lerp(fill, border, edge);
+                    c.a *= inside;
+                    px[y * size + x] = c;
+                }
+            t.SetPixels(px);
+            t.wrapMode = TextureWrapMode.Clamp;
+            t.filterMode = FilterMode.Bilinear;
+            t.Apply();
+            return t;
+        }
+
+        /// <summary>Radial gradient used for the cup so it reads as a deep hole.</summary>
+        public static Texture2D CupTexture(int size = 64)
+        {
+            var t = new Texture2D(size, size, TextureFormat.RGBA32, true);
+            var px = new Color[size * size];
+            for (int y = 0; y < size; y++)
+                for (int x = 0; x < size; x++)
+                {
+                    float dx = (x + 0.5f) / size * 2f - 1f, dy = (y + 0.5f) / size * 2f - 1f;
+                    float d = Mathf.Clamp01(Mathf.Sqrt(dx * dx + dy * dy));
+                    float g = Mathf.Lerp(0.0f, 0.22f, Mathf.Pow(d, 3f)) + (dy > 0.2f && d > 0.75f ? 0.12f : 0f);
+                    px[y * size + x] = new Color(g, g, g * 1.05f, 1f);
+                }
             t.SetPixels(px);
             t.wrapMode = TextureWrapMode.Clamp;
             t.Apply(true);
