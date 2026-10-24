@@ -4,7 +4,7 @@ namespace PangGolf
 {
     public class GolfCamera : MonoBehaviour
     {
-        public enum Mode { Aim, Landing, GreenTop, Follow, Flyover, Orbit, Title }
+        public enum Mode { Aim, Landing, GreenTop, Follow, Flyover, Orbit, Title, Showcase }
 
         public Mode mode = Mode.Title;
         public float flyT;
@@ -100,6 +100,17 @@ namespace PangGolf
                     targetPos = c + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * 4.5f + Vector3.up * 2f;
                     targetLook = c + Vector3.up * 0.4f;
                     smooth = 0.5f;
+                    break;
+                }
+                case Mode.Showcase:
+                {
+                    Vector3 focus = game.showcasePos + Vector3.up * 0.75f;
+                    float sway = Mathf.Sin(Time.time * 0.35f) * 28f;
+                    Vector3 dir = Quaternion.Euler(0f, sway, 0f) * game.showcaseDir;
+                    targetPos = focus + dir * 3.4f + Vector3.up * 0.35f;
+                    Vector3 camRight = Vector3.Cross(Vector3.up, -dir).normalized;
+                    targetLook = focus + camRight * 0.75f; // golfer sits left of centre, stats on the right
+                    smooth = 0.3f;
                     break;
                 }
                 default: // Title: slow orbit over the hole

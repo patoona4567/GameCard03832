@@ -56,6 +56,7 @@ namespace PangGolf
             switch (g.state)
             {
                 case GolfGame.State.Title: DrawTitle(); return;
+                case GolfGame.State.CharSelect: DrawCharSelect(); return;
                 case GolfGame.State.Scorecard: DrawScorecard(false); break;
                 case GolfGame.State.Final: DrawScorecard(true); break;
                 default: DrawPlay(); break;
@@ -74,7 +75,7 @@ namespace PangGolf
             Outlined(new Rect(0, 150, W, 120), "PANG GOLF", big, new Color(1f, 0.88f, 0.25f), new Color(0.55f, 0.2f, 0.05f), 3f);
             Text(new Rect(0, 255, W, 40), "Fantasy golf  -  " + Holes.All.Length + " holes", txtBig, new Color(0.8f, 0.95f, 1f));
             float blink = 0.6f + 0.4f * Mathf.Sin(Time.time * 5f);
-            Text(new Rect(0, 360, W, 40), "Press  ENTER  or  SPACE  to tee off", txtBig, new Color(1f, 1f, 1f, blink));
+            Text(new Rect(0, 360, W, 40), "Press  ENTER  or  SPACE  to choose your golfer", txtBig, new Color(1f, 1f, 1f, blink));
 
             string help =
                 "SPACE   start swing  >  set power  >  hit the impact zone\n" +
@@ -82,6 +83,68 @@ namespace PangGolf
                 "W A S D  impact point: topspin / backspin / curve       X  reset\n" +
                 "E  power shot      Q  Tomahawk / Spike / Cobra      V  landing view      C  green view";
             Text(new Rect(0, 450, W, 120), help, new GUIStyle(txtSmall) { alignment = TextAnchor.UpperCenter, fontSize = 16 }, new Color(0.9f, 0.95f, 1f));
+        }
+
+        static readonly string[] StatNames = { "POWER", "CONTROL", "ACCURACY", "SPIN", "CURVE" };
+        static readonly Color[] StatColors =
+        {
+            new Color(1f, 0.4f, 0.3f), new Color(0.35f, 0.9f, 1f), new Color(0.5f, 1f, 0.45f),
+            new Color(1f, 0.55f, 0.85f), new Color(0.75f, 0.55f, 1f),
+        };
+
+        void DrawCharSelect()
+        {
+            var d = g.Character;
+            Outlined(new Rect(0, 20, W, 56), "CHOOSE YOUR GOLFER", txtBig, new Color(1f, 0.88f, 0.3f), new Color(0.3f, 0.12f, 0.02f), 2f);
+
+            float pw = 420f, px = W - pw - 40f, py = 96f;
+            Box(new Rect(px, py, pw, 470f));
+            var nameStyle = new GUIStyle(txtHuge) { fontSize = 46 };
+            Outlined(new Rect(px, py + 10, pw, 60), d.name, nameStyle, Color.white, new Color(0.05f, 0.1f, 0.25f), 2f);
+            Text(new Rect(px, py + 68, pw, 30), d.title, txtCenter, d.accent);
+            Text(new Rect(px + 20, py + 100, pw - 40, 56), d.description,
+                 new GUIStyle(txtSmall) { alignment = TextAnchor.UpperCenter, wordWrap = true, fontSize = 15 }, new Color(0.88f, 0.94f, 1f));
+
+            int[] stats = { d.power, d.control, d.accuracy, d.spin, d.curve };
+            for (int i = 0; i < stats.Length; i++)
+            {
+                float y = py + 176f + i * 44f;
+                Text(new Rect(px + 26, y, 140, 30), StatNames[i], txt, Color.white);
+                for (int k = 0; k < 5; k++)
+                {
+                    Rect pip = new Rect(px + 170 + k * 46, y + 4, 40, 22);
+                    Track(pip);
+                    if (k < stats[i])
+                    {
+                        GUI.color = StatColors[i];
+                        GUI.DrawTexture(new Rect(pip.x + 3, pip.y + 3, pip.width - 6, pip.height - 6), white);
+                        GUI.color = Color.white;
+                        GUI.DrawTexture(new Rect(pip.x + 3, pip.y + 3, pip.width - 6, (pip.height - 6) * 0.5f), gloss);
+                    }
+                }
+            }
+            float drive = Clubs.All[0].maxYards * d.PowerMul;
+            string info = "Driver " + Mathf.RoundToInt(drive) + "y      PANGYA zone x" + d.ControlMul.ToString("0.00");
+            Text(new Rect(px, py + 404, pw, 26), info, new GUIStyle(txtSmall) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold }, new Color(1f, 0.92f, 0.5f));
+            Text(new Rect(px, py + 430, pw, 26), "Spin x" + d.SpinMul.ToString("0.00") + "      Curve x" + d.CurveMul.ToString("0.00"),
+                 new GUIStyle(txtSmall) { alignment = TextAnchor.MiddleCenter }, new Color(0.85f, 0.9f, 1f));
+
+            // Roster dots
+            int n = Characters.All.Length;
+            float dotW = 120f, total = n * dotW;
+            float dx0 = (W * 0.42f) - total * 0.5f, dy = H - 112f;
+            for (int i = 0; i < n; i++)
+            {
+                bool sel = i == g.charIndex;
+                Rect r = new Rect(dx0 + i * dotW + 6, dy, dotW - 12, 40);
+                if (sel) Box(r); else Track(r);
+                Text(r, Characters.All[i].name, new GUIStyle(txtSmall) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold },
+                     sel ? Characters.All[i].accent : new Color(0.8f, 0.85f, 0.9f));
+            }
+            float blink = 0.6f + 0.4f * Mathf.Sin(Time.time * 5f);
+            Text(new Rect(dx0 - 50, dy, 40, 40), "<", txtBig, new Color(1f, 1f, 1f, blink));
+            Text(new Rect(dx0 + total + 10, dy, 40, 40), ">", txtBig, new Color(1f, 1f, 1f, blink));
+            Text(new Rect(0, H - 56, W * 0.84f, 30), "LEFT / RIGHT  choose        ENTER  play        ESC  back", txtCenter, new Color(1f, 1f, 1f, 0.9f));
         }
 
         void DrawPlay()
@@ -110,7 +173,7 @@ namespace PangGolf
         {
             Box(new Rect(12, 12, 290, 92));
             Text(new Rect(26, 16, 270, 30), "HOLE " + (g.holeIndex + 1) + "  /  PAR " + g.Hole.par, txt, new Color(1f, 0.9f, 0.4f));
-            Text(new Rect(26, 42, 270, 24), g.Hole.name + "   " + Mathf.RoundToInt(g.course.LengthYards) + "y", txtSmall, Color.white);
+            Text(new Rect(26, 42, 270, 24), g.Hole.name + "   " + Mathf.RoundToInt(g.course.LengthYards) + "y   -   " + g.Character.name, txtSmall, Color.white);
             int done = g.TotalStrokes, par = g.TotalPar;
             string tot = par == 0 ? "E" : ToPar(done - par);
             Text(new Rect(26, 66, 270, 30), "Stroke " + (g.strokes + (g.state == GolfGame.State.Aim || g.state == GolfGame.State.Swing ? 1 : 0)) + "     Total " + tot, txt, Color.white);
@@ -183,7 +246,7 @@ namespace PangGolf
             Box(r);
             var c = g.CurrentClub;
             Text(new Rect(r.x, r.y + 6, r.width, 50), c.name, txtClub, Color.white);
-            Text(new Rect(r.x, r.y + 52, r.width, 24), "Max " + Mathf.RoundToInt(c.maxYards) + "y", txtCenter, new Color(0.8f, 0.92f, 1f));
+            Text(new Rect(r.x, r.y + 52, r.width, 24), "Max " + Mathf.RoundToInt(c.maxYards * (c.putter ? 1f : g.Character.PowerMul)) + "y", txtCenter, new Color(0.8f, 0.92f, 1f));
 
             string lieText = GolfGame.SurfaceName(g.lie) + "  " + Mathf.RoundToInt(g.LieFactor * 100f) + "%";
             Color lieCol = g.LieFactor >= 0.999f ? new Color(0.6f, 1f, 0.6f) : g.LieFactor > 0.8f ? new Color(1f, 0.9f, 0.4f) : new Color(1f, 0.5f, 0.4f);
@@ -251,7 +314,7 @@ namespace PangGolf
             Track(new Rect(gx - 4, gy - 4, gw + 8, gh + 8));
 
             // Impact zones
-            float zone = club.perfectZone * (g.powerArmed ? 0.6f : 1f);
+            float zone = g.PerfectZone;
             GUI.color = new Color(0.4f, 1f, 0.5f, 0.35f);
             GUI.DrawTexture(new Rect(X(-0.04f), gy, X(0.04f) - X(-0.04f), gh), white);
             GUI.color = new Color(0.3f, 1f, 1f, 0.95f);

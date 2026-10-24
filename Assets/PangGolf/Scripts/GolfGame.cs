@@ -9,7 +9,7 @@ namespace PangGolf
     /// </summary>
     public class GolfGame : MonoBehaviour
     {
-        public enum State { Title, Intro, Aim, Swing, Flight, Settle, HoleDone, Scorecard, Final }
+        public enum State { Title, CharSelect, Intro, Aim, Swing, Flight, Settle, HoleDone, Scorecard, Final }
 
         public const int MaxPowerSlots = 3;
         public const int StrokeLimitOverPar = 5;
@@ -83,20 +83,33 @@ namespace PangGolf
             }
         }
 
+        /// <summary>Special-shot bonus times the character's power (putter excluded).</summary>
         public float ShotMultiplier
         {
             get
             {
-                if (!powerArmed) return 1f;
-                switch (special)
+                float m = 1f;
+                if (powerArmed)
                 {
-                    case ShotType.Tomahawk: return 1.12f;
-                    case ShotType.Spike: return 1.2f;
-                    case ShotType.Cobra: return 1.15f;
-                    default: return 1.1f;
+                    switch (special)
+                    {
+                        case ShotType.Tomahawk: m = 1.12f; break;
+                        case ShotType.Spike: m = 1.2f; break;
+                        case ShotType.Cobra: m = 1.15f; break;
+                        default: m = 1.1f; break;
+                    }
                 }
+                return CurrentClub.putter ? m : m * Character.PowerMul;
             }
         }
+
+        /// <summary>Half-width of the PANGYA zone for the current club, shot and character.</summary>
+        public float PerfectZone { get { return CurrentClub.perfectZone * (powerArmed ? 0.6f : 1f) * Character.ControlMul; } }
+
+        public CharacterDef Character { get { return Characters.All[charIndex]; } }
+        public int charIndex;
+        public CharacterRig rig;
+        public Vector3 showcasePos, showcaseDir = Vector3.forward;
 
         // ------------------------------------------------------------------ Setup
 
@@ -129,6 +142,9 @@ namespace PangGolf
             BuildBall();
             BuildRing();
             BuildProbe();
+            charIndex = Mathf.Clamp(PlayerPrefs.GetInt("PangGolf.Character", 0), 0, Characters.All.Length - 1);
+            rig = CharacterRig.Create(transform, Character);
+            rig.gameObject.SetActive(false);
             gameObject.AddComponent<GolfHUD>().Init(this);
 
             foreach (var club in Clubs.All) club.SpeedFor(1f); // calibrate up front
@@ -242,7 +258,7 @@ namespace PangGolf
         void AutoClub()
         {
             if (lie == Surface.Green) { clubIndex = Clubs.Putter; return; }
-            clubIndex = Clubs.BestFor(DistanceToPin * 0.98f);
+            clubIndex = Clubs.BestFor(DistanceToPin * 0.98f / Character.PowerMul);
             if (lie == Surface.Bunker && DistanceToPin < 70f) clubIndex = Clubs.SandWedge;
         }
 
@@ -250,7 +266,7 @@ namespace PangGolf
         {
             Vector3 b = BallPos;
             Vector3 target = course.Cup;
-            float reach = CurrentClub.MaxMetres * 1.05f;
+            float reach = CurrentClub.MaxMetres * Character.PowerMul * 1.05f;
             if (!CurrentClub.putter && DistanceToPin > reach)
             {
                 float t;
@@ -259,7 +275,7 @@ namespace PangGolf
                 {
                     Vector3 p = course.PointOnPath(u);
                     Vector3 d = p - b; d.y = 0f;
-                    if (d.magnitude >= CurrentClub.MaxMetres * 0.97f) { target = p; break; }
+                    if (d.magnitude >= CurrentClub.MaxMetres * Character.PowerMul * 0.97f) { target = p; break; }
                 }
             }
             Vector3 dir = target - b; dir.y = 0f;
@@ -277,6 +293,7 @@ namespace PangGolf
 
         void BeginHole(int index)
         {
+            rig.gameObject.SetActive(false);
             LoadHole(index);
             state = State.Intro;
             stateTimer = 0f;
@@ -299,6 +316,50 @@ namespace PangGolf
             state = State.Aim;
             cam.mode = GolfCamera.Mode.Aim;
             trail.emitting = false;
+            rig.gameObject.SetActive(true);
+            rig.Place(BallPos, AimDir, course);
+            rig.Address(CurrentClub.putter);
+        }
+
+        // ------------------------------------------------------------------ Character select
+
+        void EnterCharSelect()
+        {
+            state = State.CharSelect;
+            stateTimer = 0f;
+            Vector2 a = Hole.path[0], b = Hole.path[1];
+            Vector3 along = new Vector3(b.x - a.x, 0f, b.y - a.y).normalized;
+            showcaseDir = -along;
+            showcasePos = course.TeePos + Vector3.Cross(Vector3.up, along) * 6f;
+            showcasePos.y = course.GroundY(showcasePos);
+            rig.gameObject.SetActive(true);
+            rig.Face(showcasePos, showcasePos + showcaseDir);
+            rig.Idle();
+            cam.mode = GolfCamera.Mode.Showcase;
+            cam.Snap();
+        }
+
+        void UpdateCharSelect()
+        {
+            int n = Characters.All.Length;
+            int prev = charIndex;
+            if (GInput.Down(GKey.AimLeft)) charIndex = (charIndex + n - 1) % n;
+            if (GInput.Down(GKey.AimRight)) charIndex = (charIndex + 1) % n;
+            if (charIndex != prev)
+            {
+                rig.Build(Character);
+                rig.Idle();
+                sfx.Tick();
+            }
+            if (GInput.Down(GKey.Back)) { state = State.Title; cam.mode = GolfCamera.Mode.Title; rig.gameObject.SetActive(false); return; }
+            if (stateTimer > 0.3f && GInput.Down(GKey.Confirm))
+            {
+                PlayerPrefs.SetInt("PangGolf.Character", charIndex);
+                PlayerPrefs.Save();
+                sfx.PowerUp();
+                rig.gameObject.SetActive(false);
+                StartRound();
+            }
         }
 
         void Update()
@@ -311,7 +372,10 @@ namespace PangGolf
             switch (state)
             {
                 case State.Title:
-                    if (GInput.Down(GKey.Confirm)) StartRound();
+                    if (GInput.Down(GKey.Confirm)) EnterCharSelect();
+                    break;
+                case State.CharSelect:
+                    UpdateCharSelect();
                     break;
                 case State.Intro:
                     cam.flyT = Mathf.Clamp01(stateTimer / 4.5f);
@@ -400,11 +464,13 @@ namespace PangGolf
             if (GInput.Down(GKey.Help)) showHelp = !showHelp;
 
             UpdatePrediction();
+            rig.Place(BallPos, AimDir, course);
+            rig.Address(CurrentClub.putter);
 
             if (GInput.Down(GKey.Shot))
             {
                 cam.mode = GolfCamera.Mode.Aim;
-                gauge.Begin(CurrentClub.putter ? 0.75f : 0.9f);
+                gauge.Begin((CurrentClub.putter ? 0.75f : 0.9f) * Character.GaugeSpeedMul);
                 state = State.Swing;
                 stateTimer = 0f;
                 sfx.Tick();
@@ -458,9 +524,9 @@ namespace PangGolf
                 dir = dir,
                 speed = c.SpeedFor(frac),
                 launchDeg = launch,
-                back = c.spin - impact.y * 0.9f,
-                liftSpin = c.spin - impact.y * 0.25f,
-                side = impact.x * 0.6f + extraSide,
+                back = c.spin - impact.y * 0.9f * Character.SpinMul,
+                liftSpin = c.spin - impact.y * 0.25f * Character.SpinMul,
+                side = impact.x * 0.6f * Character.CurveMul + extraSide,
                 type = type,
                 expectedCarry = c.MaxMetres * frac,
             };
@@ -513,19 +579,21 @@ namespace PangGolf
 
         void UpdateSwing(float dt)
         {
-            if (GInput.Down(GKey.Back)) { gauge.Reset(); state = State.Aim; return; }
+            if (GInput.Down(GKey.Back)) { gauge.Reset(); state = State.Aim; rig.Address(CurrentClub.putter); return; }
             if (GInput.Down(GKey.Shot)) { gauge.Press(); sfx.Tick(); }
             gauge.Tick(dt);
-            if (gauge.phase == ShotGauge.Phase.Cancelled) { gauge.Reset(); state = State.Aim; return; }
+            if (gauge.phase == ShotGauge.Phase.Cancelled) { gauge.Reset(); state = State.Aim; rig.Address(CurrentClub.putter); return; }
+            if (gauge.Active) rig.Backswing(gauge.phase == ShotGauge.Phase.Power ? gauge.marker : gauge.power);
             if (gauge.phase == ShotGauge.Phase.Done) FireShot(gauge.power, gauge.accuracy);
         }
 
         void FireShot(float power, float accuracy)
         {
             Club c = CurrentClub;
-            float zone = c.perfectZone * (powerArmed ? 0.6f : 1f);
+            float zone = PerfectZone;
             bool perfect = Mathf.Abs(accuracy) <= zone;
-            float miss = Mathf.Max(0f, Mathf.Abs(accuracy) - zone);
+            float miss = Mathf.Max(0f, Mathf.Abs(accuracy) - zone) * Character.MissMul;
+            rig.Swing();
             float sign = Mathf.Sign(accuracy); // + = early (pull/hook left), - = late (push/slice right)
 
             float yawErr = -sign * miss * (c.putter ? 35f : 100f);
@@ -664,6 +732,7 @@ namespace PangGolf
                 if (powerSlots < MaxPowerSlots) powerSlots++;
             }
             Big(name, sub, col, 4f);
+            CelebrateAtCup(diff <= 0 || strokes == 1);
             state = State.HoleDone;
             stateTimer = 0f;
             cam.mode = GolfCamera.Mode.Orbit;
@@ -673,9 +742,23 @@ namespace PangGolf
         {
             scores[holeIndex] = Hole.par + StrokeLimitOverPar;
             Big("GIVE UP", "Stroke limit reached", new Color(0.8f, 0.8f, 0.8f), 3f);
+            CelebrateAtCup(false);
             state = State.HoleDone;
             stateTimer = 0f;
             cam.mode = GolfCamera.Mode.Orbit;
+        }
+
+        /// <summary>Walks the golfer over to the cup to cheer (or sulk) while the camera orbits.</summary>
+        void CelebrateAtCup(bool happy)
+        {
+            Vector3 from = shotStart - course.Cup; from.y = 0f;
+            if (from.sqrMagnitude < 0.01f) from = course.TeePos - course.Cup;
+            from.y = 0f;
+            Vector3 p = course.Cup + from.normalized * 2.4f;
+            p.y = course.GroundY(p);
+            rig.gameObject.SetActive(true);
+            rig.Face(p, course.Cup);
+            if (happy) rig.Cheer(); else rig.Sad();
         }
 
         void Settle(System.Action then)
